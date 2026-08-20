@@ -30,6 +30,26 @@ describe('domain helpers', () => {
     ).toEqual(['Content Creation and Social Media']);
   });
 
+  it('keeps pipe-separated official domains in applicant order', () => {
+    expect(
+      extractPreferredDomains(
+        'Event Management and Operations | Outreach and Public Relations | Graphic Designing & Video Editing'
+      )
+    ).toEqual([
+      'Event Management and Operations',
+      'Outreach and Public Relations',
+      'Graphic Designing & Video Editing'
+    ]);
+  });
+
+  it('maps a graphic-design long label without picking up event flyers', () => {
+    expect(
+      extractPreferredDomains(
+        'Graphic Designing & Video Editing (e.g., marketing posters, short-form video edits, event flyers)'
+      )
+    ).toEqual(['Graphic Designing & Video Editing']);
+  });
+
   it('canonicalizes legacy short names', () => {
     expect(canonicalizeDomain('Content Creation & Social Media')).toBe('Content Creation and Social Media');
     expect(canonicalizeDomain('Documentation & Administration')).toBe('Documentation and Administrative Support');

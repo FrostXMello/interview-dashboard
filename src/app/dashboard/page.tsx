@@ -565,20 +565,25 @@ export default function Dashboard() {
                       <div><span className="font-semibold text-gray-400">Program:</span> {selectedStudent.form.program || '—'}</div>
                       <div><span className="font-semibold text-gray-400">Commitment:</span> {selectedStudent.form.commitment ? `${selectedStudent.form.commitment}/5` : '—'}</div>
                       <div><span className="font-semibold text-gray-400">CV:</span> {selectedStudent.form.cvLink ? <a href={selectedStudent.form.cvLink} target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 underline underline-offset-2">Open link</a> : '—'}</div>
-                      <div>
-                        <div className="font-semibold text-gray-400 mb-2">Preferred Domains:</div>
-                        <div className="flex flex-wrap gap-2">
-                          {selectedPreferredDomains.length > 0 ? selectedPreferredDomains.map((domain) => (
-                            <span
-                              key={domain}
-                              className="inline-flex items-center px-2.5 py-1 rounded-full border border-blue-500/35 bg-blue-500/10 text-blue-200 text-xs font-semibold"
-                            >
-                              {domain}
-                            </span>
-                          )) : (
-                            <span className="text-gray-400">{selectedStudent.form.domains?.trim() || '—'}</span>
-                          )}
+                      <div className="pt-1">
+                        <div className="font-semibold text-gray-400 mb-2">
+                          Preferred Domains
+                          {selectedPreferredDomains.length > 1 ? ` (${selectedPreferredDomains.length})` : ''}
                         </div>
+                        {selectedPreferredDomains.length > 0 ? (
+                          <ul className="space-y-2">
+                            {selectedPreferredDomains.map((domain) => (
+                              <li
+                                key={domain}
+                                className="rounded-lg border border-blue-500/35 bg-blue-500/10 px-3 py-2 text-sm font-semibold text-blue-100"
+                              >
+                                {domain}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <span className="text-gray-400">{selectedStudent.form.domains?.trim() || '—'}</span>
+                        )}
                       </div>
                     </div>
 

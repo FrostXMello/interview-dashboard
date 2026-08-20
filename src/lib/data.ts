@@ -88,27 +88,43 @@ export function canonicalizeDomain(value: string): DomainOption | null {
   return null;
 }
 
-/** Split on commas that are not inside parentheses, so "(Design, Writing)" stays one domain. */
+/** Split on pipes/semicolons first, then on commas that are not inside parentheses. */
 function splitDomainParts(raw: string): string[] {
   const parts: string[] = [];
-  let current = '';
-  let depth = 0;
-  for (const ch of raw) {
-    if (ch === '(') depth += 1;
-    else if (ch === ')') depth = Math.max(0, depth - 1);
-    if (ch === ',' && depth === 0) {
-      if (current.trim()) parts.push(current.trim());
-      current = '';
-      continue;
+  const pushChunk = (chunk: string) => {
+    let current = '';
+    let depth = 0;
+    for (const ch of chunk) {
+      if (ch === '(') depth += 1;
+      else if (ch === ')') depth = Math.max(0, depth - 1);
+      if (ch === ',' && depth === 0) {
+        if (current.trim()) parts.push(current.trim());
+        current = '';
+        continue;
+      }
+      current += ch;
     }
-    current += ch;
+    if (current.trim()) parts.push(current.trim());
+  };
+
+  for (const coarse of raw.split(/\s*(?:\||;|\n)\s*/)) {
+    if (coarse.trim()) pushChunk(coarse);
   }
-  if (current.trim()) parts.push(current.trim());
   return parts;
 }
 
-export function extractPreferredDomains(raw?: string): DomainOption[] {
-  if (!raw) return [];
+export function extractPreferredDomains(raw?: string | string[] | null): DomainOption[] {
+  if (!raw || (Array.isArray(raw) && raw.length === 0)) return [];
+  if (Array.isArray(raw)) {
+    const found: DomainOption[] = [];
+    for (const item of raw) {
+      for (const domain of extractPreferredDomains(item)) {
+        if (!found.includes(domain)) found.push(domain);
+      }
+    }
+    return found;
+  }
+
   const found: DomainOption[] = [];
   const add = (domain: DomainOption | null) => {
     if (domain && !found.includes(domain)) found.push(domain);

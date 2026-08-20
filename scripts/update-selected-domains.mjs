@@ -1,6 +1,6 @@
 /**
- * Apply selectedDomains from scripts/data/isc-selected-domains.json onto
- * applications.domains, mapped to the five official dashboard domains.
+ * Merge every domain a candidate chose (application domainInterests +
+ * selectedDomains) onto applications.domains, using official dashboard names.
  */
 import { createClient } from '@supabase/supabase-js';
 import { existsSync, readFileSync } from 'node:fs';
@@ -35,9 +35,51 @@ function canonicalizeDomain(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) return null;
   for (const { domain, needles } of DOMAIN_NEEDLES) {
+    if (domain.toLowerCase() === normalized) return domain;
     if (needles.some((needle) => normalized.includes(needle))) return domain;
   }
   return null;
+}
+
+function splitDomainParts(raw) {
+  const parts = [];
+  const pushChunk = (chunk) => {
+    let current = '';
+    let depth = 0;
+    for (const ch of String(chunk || '')) {
+      if (ch === '(') depth += 1;
+      else if (ch === ')') depth = Math.max(0, depth - 1);
+      if (ch === ',' && depth === 0) {
+        if (current.trim()) parts.push(current.trim());
+        current = '';
+        continue;
+      }
+      current += ch;
+    }
+    if (current.trim()) parts.push(current.trim());
+  };
+  for (const coarse of String(raw || '').split(/\s*(?:\||;|\n)\s*/)) {
+    if (coarse.trim()) pushChunk(coarse);
+  }
+  return parts;
+}
+
+function addMapped(set, raw) {
+  if (Array.isArray(raw)) {
+    for (const item of raw) addMapped(set, item);
+    return;
+  }
+  for (const part of splitDomainParts(raw)) {
+    const mapped = canonicalizeDomain(part);
+    if (mapped) set.add(mapped);
+  }
+}
+
+function loadJson(name) {
+  const filePath = resolve(process.cwd(), 'scripts/data', name);
+  if (!existsSync(filePath)) return [];
+  const rows = JSON.parse(readFileSync(filePath, 'utf8'));
+  return Array.isArray(rows) ? rows : [];
 }
 
 const url = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
@@ -47,31 +89,27 @@ if (!url || !serviceRoleKey) {
   process.exit(2);
 }
 
-const payloadPath = resolve(process.cwd(), 'scripts/data/isc-selected-domains.json');
-if (!existsSync(payloadPath)) {
-  console.error('NOT RUN: scripts/data/isc-selected-domains.json is required.');
-  process.exit(2);
-}
-
-const rows = JSON.parse(readFileSync(payloadPath, 'utf8'));
-if (!Array.isArray(rows) || rows.length === 0) {
-  console.error('NOT RUN: selected-domains payload is empty.');
-  process.exit(2);
-}
-
 const domainsByReg = new Map();
-const unmapped = [];
-for (const row of rows) {
-  const regNo = String(row.mujRegistrationNumber || '').trim();
-  const selected = Array.isArray(row.selectedDomains) ? row.selectedDomains : [];
-  if (!regNo) continue;
-  const current = domainsByReg.get(regNo) || new Set();
-  for (const raw of selected) {
-    const mapped = canonicalizeDomain(raw);
-    if (mapped) current.add(mapped);
-    else unmapped.push({ regNo, raw });
-  }
-  domainsByReg.set(regNo, current);
+function bucket(regNo) {
+  const key = String(regNo || '').trim();
+  if (!key) return null;
+  if (!domainsByReg.has(key)) domainsByReg.set(key, new Set());
+  return domainsByReg.get(key);
+}
+
+for (const row of loadJson('isc-selected-domains.json')) {
+  const set = bucket(row.mujRegistrationNumber);
+  if (set) addMapped(set, row.selectedDomains);
+}
+
+for (const row of [...loadJson('isc-jw-interviews.json'), ...loadJson('isc-unscheduled.json')]) {
+  const set = bucket(row.mujRegistrationNumber);
+  if (set) addMapped(set, row.domainInterests);
+}
+
+if (domainsByReg.size === 0) {
+  console.error('NOT RUN: no domain rows found in scripts/data.');
+  process.exit(2);
 }
 
 const supabase = createClient(url, serviceRoleKey, {
@@ -89,20 +127,26 @@ if (candidateError) {
 const idsByReg = new Map();
 for (const row of candidates || []) {
   const list = idsByReg.get(row.reg_no) || [];
-  list.push(row.id);
+  list.push({ id: row.id, name: row.display_name });
   idsByReg.set(row.reg_no, list);
 }
 
 let updated = 0;
 let missing = 0;
+let multi = 0;
 for (const [regNo, domainSet] of domainsByReg.entries()) {
-  const ids = idsByReg.get(regNo) || [];
-  if (ids.length === 0) {
+  const rows = idsByReg.get(regNo) || [];
+  if (rows.length === 0) {
     missing += 1;
     console.log(`missing candidate ${regNo}`);
     continue;
   }
-  const domains = [...domainSet].join(', ');
+  const domains = [...domainSet].join(' | ');
+  if (domainSet.size > 1) {
+    multi += 1;
+    console.log(`multi ${regNo} ${rows[0]?.name}: ${domains}`);
+  }
+  const ids = rows.map((row) => row.id);
   const { error } = await supabase.from('applications').update({ domains }).in('candidate_id', ids);
   if (error) {
     console.error('FAILED: domain update for', regNo, error.message);
@@ -112,8 +156,5 @@ for (const [regNo, domainSet] of domainsByReg.entries()) {
 }
 
 console.log(`Updated domains on ${updated} candidate application(s) across ${domainsByReg.size} registration numbers.`);
+console.log(`Candidates with multiple preferred domains: ${multi}.`);
 if (missing) console.log(`No candidate row for ${missing} registration number(s).`);
-if (unmapped.length) {
-  console.log('Unmapped domain strings:');
-  for (const row of unmapped) console.log(`- ${row.regNo}: ${row.raw}`);
-}
