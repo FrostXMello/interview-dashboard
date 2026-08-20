@@ -6,9 +6,15 @@
     "build": "next build --webpack",
     "dev": "next dev",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify:rls": "node scripts/verify-rls.mjs",
+    "seed:allowed-phones": "node scripts/seed-allowed-phones.mjs",
+    "provision:super-admin": "node scripts/provision-super-admin.mjs"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.35.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.577.0",
@@ -25,6 +31,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.7"
   }
 }

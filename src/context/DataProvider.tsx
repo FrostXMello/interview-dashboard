@@ -1,732 +1,726 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, Student, Rating, INITIAL_USERS, INITIAL_STUDENTS } from '@/lib/data';
-import { supabase } from '@/lib/supabase';
-import APPLICANTS from '@/lib/applicants';
-import type { ApplicantForm } from '@/lib/applicants';
-
-type RealtimePayload<T> = {
-  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
-  new: T;
-  old: T;
-};
-
-type SupabaseRatingRow = {
-  studentid?: string;
-  panelistid?: string;
-  studentId?: string;
-  panelistId?: string;
-  scores?: Record<string, number | string[]>;
-  comment?: string;
-  submitted?: boolean;
-  active?: boolean;
-  bestDomain?: string;
-  domainPriorities?: string[];
-};
-
-type SupabaseStudentRow = {
-  id?: string;
-  regno?: string;
-  regNo?: string;
-  name?: string;
-  timing?: string;
-  panelid?: number;
-  panelId?: number;
-  status?: string;
-  form?: ApplicantForm;
-};
-
-type SupabaseUserRow = {
-  id?: string;
-  name?: string;
-  email?: string;
-  phone?: string;
-  password?: string;
-  role?: string;
-  panelid?: number;
-  panelId?: number;
-};
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import type { InterviewDay, Rating, Student, User } from '@/lib/data';
+import { DEMO_PERSONAS } from '@/lib/data';
+import {
+  clearLegacyAuthStorage,
+  getInterviewRepository,
+  type SyncStatus
+} from '@/lib/data-access';
+import { AppError, type AppErrorCode } from '@/lib/errors';
+import { getSupabaseConfigDiagnostics, type AppMode } from '@/lib/mode';
+import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 
 interface DataContextType {
+  appMode: AppMode;
+  configSummary: string;
+  isDemoSession: boolean;
+  syncStatus: SyncStatus;
+  lastError: { code: AppErrorCode; message: string } | null;
+  clearError: () => void;
   currentUser: User | null;
   users: User[];
   students: Student[];
   ratings: Rating[];
-  login: (phone: string, pass: string, nameHint?: string, rememberMe?: boolean) => boolean;
+  demoPersonas: User[];
+  /** Connected mode: Supabase Auth email/password. */
+  loginWithPassword: (email: string, password: string) => Promise<boolean>;
+  /** Offline-demo mode only: enter a synthetic persona (no password). */
+  enterDemoPersona: (personaId: string) => Promise<boolean>;
+  /** @deprecated Prefer loginWithPassword / enterDemoPersona */
+  login: (identifier: string, pass: string, nameHint?: string, rememberMe?: boolean) => boolean;
   logout: () => void;
   addStudent: (student: Student) => void;
   updateRating: (rating: Rating) => void;
   submitRating: (studentId: string, panelistId: string) => void;
   setRatingSubmitted: (studentId: string, panelistId: string, value: boolean) => void;
+  setStudentStatus: (studentId: string, status: Student['status']) => Promise<boolean>;
+  listPanels: () => Promise<Array<{ id: number; name: string }>>;
+  createPanelist: (input: {
+    phone: string;
+    password?: string;
+    displayName: string;
+    displayTitle?: string;
+    role?: User['role'];
+    panelIds: number[];
+  }) => Promise<boolean>;
+  updateUser: (
+    userId: string,
+    updates: {
+      displayName?: string;
+      displayTitle?: string;
+      role?: User['role'];
+      isActive?: boolean;
+      phone?: string;
+    }
+  ) => Promise<boolean>;
+  updatePanelMemberships: (userId: string, panelIds: number[]) => Promise<boolean>;
+  createCandidate: (input: {
+    regNo: string;
+    name: string;
+    day: InterviewDay;
+    panelId: number;
+    timing: string;
+    status: Student['status'];
+    form?: Student['form'];
+  }) => Promise<boolean>;
+  updateCandidate: (
+    candidateId: string,
+    updates: {
+      regNo?: string;
+      name?: string;
+      day?: InterviewDay;
+      panelId?: number;
+      timing?: string;
+      status?: Student['status'];
+      isActive?: boolean;
+      form?: Student['form'];
+    }
+  ) => Promise<boolean>;
   getStudentRatings: (studentId: string) => Rating[];
   getOverallScore: (studentId: string) => number;
+  refreshFromServer: () => Promise<void>;
+  /** Super Admin only: UI switch into the panelist interview dashboard. Does not change DB role. */
+  viewAsPanelist: boolean;
+  setViewAsPanelist: (value: boolean) => void;
 }
 
 const DataContext = createContext<DataContextType>({} as DataContextType);
 
 export const useData = () => useContext(DataContext);
 
-const CURRENT_USER_KEY = 'interview_curr_user';
-const REMEMBER_ME_KEY = 'interview_remember_me';
+const VIEW_AS_PANELIST_KEY = 'idash.viewAsPanelist';
 
-const normalizeRating = (rating: Rating): Rating => {
-  const scores = { ...(rating.scores || {}) } as Record<string, number | string[]>;
+function persistViewAsPanelist(value: boolean) {
+  try {
+    if (value) sessionStorage.setItem(VIEW_AS_PANELIST_KEY, '1');
+    else sessionStorage.removeItem(VIEW_AS_PANELIST_KEY);
+  } catch {
+    // Ignore quota / private-mode failures; in-memory state still works.
+  }
+}
 
-  const priorityFromScores = Array.isArray(scores.__domainPriorities)
-    ? (scores.__domainPriorities as string[])
+function normalizeRating(rating: Rating): Rating {
+  const scores: Record<string, number> = {};
+  Object.entries(rating.scores || {}).forEach(([key, value]) => {
+    if (typeof value === 'number') scores[key] = value;
+  });
+
+  const domainPriorities = Array.isArray(rating.domainPriorities)
+    ? rating.domainPriorities.filter(Boolean).slice(0, 3)
     : [];
-
-  const explicitPriorities = Array.isArray(rating.domainPriorities)
-    ? rating.domainPriorities.filter(Boolean)
-    : [];
-
-  const domainPriorities = explicitPriorities.length > 0
-    ? explicitPriorities
-    : priorityFromScores.filter(Boolean);
-
-  const nextScores = { ...scores };
-  nextScores.__domainPriorities = domainPriorities;
 
   return {
     ...rating,
-    scores: nextScores,
+    scores,
     domainPriorities,
     bestDomain: rating.bestDomain || domainPriorities[0] || ''
   };
-};
+}
 
-const fromSupabaseRatingRow = (row: SupabaseRatingRow): Rating => {
-  const studentId = row.studentid || row.studentId || '';
-  const panelistId = row.panelistid || row.panelistId || '';
+function ratingKey(rating: Pick<Rating, 'studentId' | 'panelistId'>) {
+  return `${rating.studentId}::${rating.panelistId}`;
+}
 
-  return normalizeRating({
-    studentId,
-    panelistId,
-    scores: (row.scores || {}) as Record<string, number | string[]>,
-    comment: row.comment || '',
-    submitted: Boolean(row.submitted),
-    active: Boolean(row.active),
-    bestDomain: row.bestDomain || '',
-    domainPriorities: Array.isArray(row.domainPriorities) ? row.domainPriorities : []
-  } as Rating);
-};
-
-const toSupabaseRatingPayload = (rating: Rating) => {
-  const normalized = normalizeRating(rating);
-  const scorePayload = {
-    ...(normalized.scores || {}),
-    __domainPriorities: normalized.domainPriorities || []
-  };
-
-  // Keep payload compatible with existing Supabase ratings schema.
-  return {
-    studentid: normalized.studentId,
-    panelistid: normalized.panelistId,
-    scores: scorePayload,
-    comment: normalized.comment,
-    submitted: normalized.submitted,
-    active: normalized.active
-  };
-};
-
-const normalizeProficiencies = (app: ApplicantForm) => {
-  const prof = app.proficiencies || {};
-
-  let communication = prof['Communication'];
-  let timeManagement = prof['Time Management'];
-  let teamWork = prof['Team Work'];
-  const graphicDesign = prof['Graphic Design'];
-
-  // Older imported rows are shifted by one column. Shift to maintain all 4 keys.
-  if (!communication && (timeManagement || teamWork || graphicDesign)) {
-    communication = timeManagement;
-    timeManagement = teamWork;
-    teamWork = graphicDesign;
+function upsertLocalRating(list: Rating[], rating: Rating): Rating[] {
+  const idx = list.findIndex(
+    (row) => row.studentId === rating.studentId && row.panelistId === rating.panelistId
+  );
+  if (idx >= 0) {
+    const next = [...list];
+    next[idx] = rating;
+    return next;
   }
+  return [...list, rating];
+}
 
-  return {
-    Communication: communication || '—',
-    'Time Management': timeManagement || '—',
-    'Team Work': teamWork || '—',
-    'Graphic Design': graphicDesign || '—'
-  };
-};
-
-const normalizeLookup = (value?: string) => (value || '').trim().toLowerCase();
-
-const buildFormFromApplicant = (app: ApplicantForm): ApplicantForm => ({
-  timestamp: app.timestamp,
-  fullName: app.fullName,
-  regNo: app.regNo,
-  email: app.email,
-  phone: app.phone,
-  program: app.program,
-  whyInterested: app.whyInterested,
-  domains: app.domains,
-  proficiencies: normalizeProficiencies(app),
-  commitment: app.commitment,
-  experience: app.experience,
-  cvLink: app.cvLink
-});
-
-const APPLICANT_BY_REG = new Map(
-  APPLICANTS
-    .filter((app) => app.regNo)
-    .map((app) => [normalizeLookup(app.regNo), app] as const)
-);
-
-const APPLICANT_BY_NAME = new Map(
-  APPLICANTS
-    .filter((app) => app.fullName)
-    .map((app) => [normalizeLookup(app.fullName), app] as const)
-);
-
-const enrichStudentWithApplicant = (student: Student): Student => {
-  const fullNameKey = normalizeLookup(student.name);
-  const firstNameKey = normalizeLookup(student.name.split(' ')[0]);
-
-  const match = APPLICANT_BY_REG.get(normalizeLookup(student.regNo))
-    || APPLICANT_BY_NAME.get(fullNameKey)
-    || APPLICANT_BY_NAME.get(firstNameKey)
-    || APPLICANTS.find((app) => {
-      const appName = normalizeLookup(app.fullName);
-      return Boolean(appName) && (appName.startsWith(`${firstNameKey} `) || fullNameKey.startsWith(`${appName} `));
-    });
-
-  if (!match) return student;
-
-  const mergedForm = {
-    ...buildFormFromApplicant(match),
-    ...(student.form || {})
-  };
-
-  return {
-    ...student,
-    form: mergedForm
-  };
-};
-
-const fromSupabaseStudentRow = (row: SupabaseStudentRow): Student => {
-  const panelCandidate = row.panelid ?? row.panelId ?? 0;
-  const panelId = Number.isFinite(Number(panelCandidate)) ? Number(panelCandidate) : 0;
-  const status = row.status === 'pending' || row.status === 'interviewing' || row.status === 'completed'
-    ? row.status
-    : 'pending';
-
-  const student: Student = {
-    id: row.id || `tbd-${normalizeLookup(row.regno || row.regNo || row.name || 'unknown')}`,
-    regNo: (row.regno || row.regNo || '').trim(),
-    name: (row.name || '').trim(),
-    timing: (row.timing || 'TBD').trim(),
-    panelId,
-    status,
-    form: row.form
-  };
-
-  return enrichStudentWithApplicant(student);
-};
-
-const toSupabaseStudentPayload = (student: Student): SupabaseStudentRow => {
-  const enriched = enrichStudentWithApplicant(student);
-  return {
-    id: enriched.id,
-    regno: enriched.regNo,
-    name: enriched.name,
-    timing: enriched.timing,
-    panelid: enriched.panelId,
-    status: enriched.status,
-    form: enriched.form
-  };
-};
-
-const mergeStudentsById = (base: Student[], incoming: Student[]): Student[] => {
-  const merged = new Map<string, Student>();
-
-  base.forEach((student) => {
-    merged.set(student.id, student);
+function mergeRatingsPreservingPending(incoming: Rating[], previous: Rating[], pendingKeys: Set<string>): Rating[] {
+  const merged = incoming.map((row) => {
+    const key = ratingKey(row);
+    if (!pendingKeys.has(key)) return row;
+    return previous.find((item) => ratingKey(item) === key) || row;
   });
-
-  incoming.forEach((student) => {
-    merged.set(student.id, student);
+  previous.forEach((local) => {
+    const key = ratingKey(local);
+    if (pendingKeys.has(key) && !merged.some((row) => ratingKey(row) === key)) {
+      merged.push(local);
+    }
   });
-
-  return Array.from(merged.values());
-};
-
-const fromSupabaseUserRow = (row: SupabaseUserRow): User | null => {
-  const phone = (row.phone || '').trim();
-  const password = (row.password || '').trim();
-  const name = (row.name || '').trim();
-
-  if (!phone || !password || !name) return null;
-
-  const panelCandidate = row.panelid ?? row.panelId;
-  const parsedPanel = Number(panelCandidate);
-
-  return {
-    id: (row.id || `sb-${phone}`).trim(),
-    name,
-    email: row.email,
-    phone,
-    password,
-    role: (row.role || 'panelist').trim(),
-    panelId: Number.isFinite(parsedPanel) ? parsedPanel : undefined
-  };
-};
-
-const toSupabaseUserPayload = (user: User): SupabaseUserRow => ({
-  id: user.id,
-  name: user.name,
-  email: user.email,
-  phone: user.phone,
-  password: user.password,
-  role: user.role,
-  panelid: user.panelId
-});
-
-const mergeUsersByPhone = (primary: User[], fallback: User[]): User[] => {
-  const merged = new Map<string, User>();
-
-  fallback.forEach((user) => {
-    merged.set(user.phone.trim(), user);
-  });
-
-  primary.forEach((user) => {
-    merged.set(user.phone.trim(), user);
-  });
-
-  return Array.from(merged.values());
-};
-
-const normalizePhoneForLogin = (value: string) => value.replace(/\D/g, '');
-
-const buildLoginUsers = (primary: User[], fallback: User[]): User[] => {
-  const seen = new Set<string>();
-  const combined = [...primary, ...fallback];
-
-  return combined.filter((user) => {
-    const key = `${normalizePhoneForLogin(user.phone)}|${user.password.trim()}|${user.name.trim().toLowerCase()}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-};
+  return merged;
+}
 
 export const DataProvider = ({ children }: { children: React.ReactNode }) => {
+  const repository = useMemo(() => getInterviewRepository(), []);
+  const config = useMemo(() => getSupabaseConfigDiagnostics(), []);
+  const appMode = repository.mode;
+
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [rememberMe, setRememberMe] = useState(true);
-  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
-  const [students, setStudents] = useState<Student[]>(INITIAL_STUDENTS.map(enrichStudentWithApplicant));
+  const [isDemoSession, setIsDemoSession] = useState(appMode === 'offline-demo');
+  const [users, setUsers] = useState<User[]>(appMode === 'offline-demo' ? DEMO_PERSONAS : []);
+  const [students, setStudents] = useState<Student[]>([]);
   const [ratings, setRatings] = useState<Rating[]>([]);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('loading');
+  const [lastError, setLastError] = useState<{ code: AppErrorCode; message: string } | null>(null);
+  const [panels, setPanels] = useState<Array<{ id: number; name: string }>>([]);
+  const [viewAsPanelist, setViewAsPanelistState] = useState(false);
+  const pendingByKeyRef = useRef(new Map<string, Rating>());
+  const inFlightKeysRef = useRef(new Set<string>());
 
-  // Restore local session state immediately so refresh/offline does not lose in-progress edits.
   useEffect(() => {
-    const savedRemember = localStorage.getItem(REMEMBER_ME_KEY);
-    const persistedUser = localStorage.getItem(CURRENT_USER_KEY);
-    const sessionUser = sessionStorage.getItem(CURRENT_USER_KEY);
-
-    if (persistedUser) {
-      setCurrentUser(JSON.parse(persistedUser));
-      setRememberMe(savedRemember !== '0');
-    } else if (sessionUser) {
-      setCurrentUser(JSON.parse(sessionUser));
-      setRememberMe(false);
-    }
-
-    const savedStudents = localStorage.getItem('interview_students');
-    if (savedStudents) {
-      try {
-        const parsed = JSON.parse(savedStudents) as Student[];
-        setStudents(parsed.map(enrichStudentWithApplicant));
-      } catch {}
-    }
-
-    const savedRatings = localStorage.getItem('interview_ratings');
-    if (savedRatings) {
-      try {
-        const parsed = JSON.parse(savedRatings) as Rating[];
-        setRatings(parsed.map(normalizeRating));
-      } catch {}
-    }
-  }, []);
-
-  // On reconnect, sync local snapshot to backend so offline edits are persisted.
-  useEffect(() => {
-    const sb = supabase;
-    if (!sb) return;
-
-    const syncOnReconnect = () => {
-      const studentPayload = students.map(toSupabaseStudentPayload);
-      const ratingPayload = ratings.map(toSupabaseRatingPayload);
-
-      if (studentPayload.length > 0) {
-        sb
-          .from('students')
-          .upsert(studentPayload, { onConflict: 'id' })
-          .then(() => {}, (err: unknown) => console.warn('Supabase reconnect students sync failed', err));
-      }
-
-      if (ratingPayload.length > 0) {
-        sb
-          .from('ratings')
-          .upsert(ratingPayload, { onConflict: 'studentid,panelistid' })
-          .then(() => {}, (err: unknown) => console.warn('Supabase reconnect ratings sync failed', err));
-      }
-    };
-
-    window.addEventListener('online', syncOnReconnect);
-    return () => window.removeEventListener('online', syncOnReconnect);
-  }, [students, ratings]);
-
-  // Merge applicant forms into students (match by regNo or name). Add unassigned applicants as TBD under panel 2.
-  useEffect(() => {
-    if (!APPLICANTS || APPLICANTS.length === 0) return;
-
-    setStudents(prev => {
-      const next = [...prev];
-      const existingRegMap = new Map(next.map(s => [s.regNo, s]));
-      APPLICANTS.forEach(app => {
-        const reg = app.regNo || '';
-        let matched: Student | undefined;
-        if (reg && existingRegMap.has(reg)) {
-          matched = existingRegMap.get(reg);
-        } else {
-          // try match by name
-          matched = next.find(s => s.name && app.fullName && s.name.toLowerCase().includes(app.fullName!.split(' ')[0].toLowerCase()));
-        }
-
-        if (matched) {
-          // attach form
-          matched.form = buildFormFromApplicant(app);
-        } else {
-          // add as new TBD student under panelId 0
-          const newid = `s${next.length + 1}`;
-          next.push({
-            id: newid,
-            regNo: app.regNo || `NA-${newid}`,
-            name: app.fullName || (app.email || 'Unnamed'),
-            timing: 'TBD',
-            panelId: 0,
-            status: 'pending',
-            form: buildFormFromApplicant(app)
-          });
-        }
-      });
-
-      return next;
-    });
-  }, []);
-
-  // If Supabase is configured, fetch canonical data and subscribe to realtime updates
-  useEffect(() => {
-    if (!supabase) return;
-
-    let mounted = true;
-
-    (async () => {
-      try {
-        await supabase.from('users').upsert(INITIAL_USERS.map(toSupabaseUserPayload), { onConflict: 'phone' });
-      } catch (err) {
-        console.warn('Supabase users seed sync failed', err);
-      }
-
-      try {
-        const { data: uData, error: uError } = await supabase.from('users').select('*');
-        if (uError) {
-          console.warn('Supabase users sync failed', uError.message);
-        } else if (mounted && uData) {
-          const nextUsers = (uData as SupabaseUserRow[])
-            .map(fromSupabaseUserRow)
-            .filter((u): u is User => Boolean(u));
-
-          if (nextUsers.length > 0) {
-            setUsers(mergeUsersByPhone(nextUsers, INITIAL_USERS));
-          }
-        }
-      } catch (err) {
-        console.warn('Supabase users sync failed', err);
-      }
-
-      try {
-        const { data: sData, error: sError } = await supabase.from('students').select('*');
-        if (sError) {
-          console.warn('Supabase students sync failed', sError.message);
-        } else if (mounted && sData) {
-          setStudents((prev) => {
-            try {
-              const builtInSchedule = INITIAL_STUDENTS.map(enrichStudentWithApplicant);
-              const remoteStudents = (sData as SupabaseStudentRow[]).map(fromSupabaseStudentRow);
-              const localPlusBuiltIn = mergeStudentsById(builtInSchedule, prev);
-              return mergeStudentsById(localPlusBuiltIn, remoteStudents);
-            } catch {
-              return prev;
-            }
-          });
-        }
-      } catch (err) {
-        console.warn('Supabase students sync failed', err);
-      }
-
-      try {
-        const { data: rData, error: rError } = await supabase.from('ratings').select('*');
-        if (rError) {
-          console.warn('Supabase ratings sync failed', rError.message);
-        } else if (mounted && rData) {
-          setRatings((prev) => {
-            try {
-              return (rData as SupabaseRatingRow[]).map(fromSupabaseRatingRow);
-            } catch {
-              return prev;
-            }
-          });
-        }
-      } catch (err) {
-        console.warn('Supabase ratings sync failed', err);
-      }
-    })();
-
-    // subscribe to students and ratings changes (basic)
     try {
-      const userSub = supabase.channel('public:users').on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, payload => {
-        const ev = payload as unknown as RealtimePayload<SupabaseUserRow>;
-        if (ev.eventType === 'INSERT' || ev.eventType === 'UPDATE') {
-          const nextUser = fromSupabaseUserRow(ev.new);
-          if (!nextUser) return;
-
-          setUsers(prev => {
-            const updated = prev.filter(u => u.id !== nextUser.id && u.phone !== nextUser.phone);
-            return [...updated, nextUser];
-          });
-        }
-        if (ev.eventType === 'DELETE') {
-          const oldPhone = (ev.old.phone || '').trim();
-          const oldId = (ev.old.id || '').trim();
-          setUsers(prev => prev.filter(u => u.id !== oldId && u.phone !== oldPhone));
-        }
-      }).subscribe();
-
-      const studentSub = supabase.channel('public:students').on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, payload => {
-        const ev = payload as unknown as RealtimePayload<SupabaseStudentRow>;
-        if (ev.eventType === 'INSERT' || ev.eventType === 'UPDATE') {
-          setStudents(prev => {
-            const nextStudent = fromSupabaseStudentRow(ev.new);
-            const updated = prev.filter(s => s.id !== nextStudent.id);
-            return [...updated, nextStudent];
-          });
-        }
-        if (ev.eventType === 'DELETE') {
-          const oldId = ev.old.id;
-          setStudents(prev => prev.filter(s => s.id !== oldId));
-        }
-      }).subscribe();
-
-      const ratingSub = supabase.channel('public:ratings').on('postgres_changes', { event: '*', schema: 'public', table: 'ratings' }, payload => {
-        const ev = payload as unknown as RealtimePayload<SupabaseRatingRow>;
-        if (ev.eventType === 'INSERT' || ev.eventType === 'UPDATE') {
-          setRatings(prev => {
-            const nextRating = fromSupabaseRatingRow(ev.new);
-            const updated = prev.filter(r => !(r.studentId === nextRating.studentId && r.panelistId === nextRating.panelistId));
-            return [...updated, nextRating];
-          });
-        }
-        if (ev.eventType === 'DELETE') {
-          const oldRating = fromSupabaseRatingRow(ev.old);
-          setRatings(prev => prev.filter(r => !(r.studentId === oldRating.studentId && r.panelistId === oldRating.panelistId)));
-        }
-      }).subscribe();
-
-      return () => {
-        mounted = false;
-        try { if (supabase && userSub) { supabase.removeChannel(userSub); } } catch {}
-        try { if (supabase && studentSub) { supabase.removeChannel(studentSub); } } catch {}
-        try { if (supabase && ratingSub) { supabase.removeChannel(ratingSub); } } catch {}
-      };
+      setViewAsPanelistState(sessionStorage.getItem(VIEW_AS_PANELIST_KEY) === '1');
     } catch {
-      // supabase channel not available in older clients — ignore
+      setViewAsPanelistState(false);
     }
   }, []);
 
-  // Sync to LocalStorage whenever data changes
-  useEffect(() => {
-    localStorage.setItem('interview_students', JSON.stringify(students));
-  }, [students]);
+  const setViewAsPanelist = useCallback((value: boolean) => {
+    setViewAsPanelistState(value);
+    persistViewAsPanelist(value);
+  }, []);
 
-  useEffect(() => {
-    localStorage.setItem('interview_ratings', JSON.stringify(ratings));
-  }, [ratings]);
+  const clearError = useCallback(() => setLastError(null), []);
 
-  useEffect(() => {
-    if (currentUser) {
-      if (rememberMe) {
-        localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
-        localStorage.setItem(REMEMBER_ME_KEY, '1');
-        sessionStorage.removeItem(CURRENT_USER_KEY);
+  const reportError = useCallback((error: AppError) => {
+    setLastError({ code: error.code, message: error.userMessage });
+    setSyncStatus(
+      error.code === 'OFFLINE'
+        ? 'offline'
+        : error.code === 'AUTHORIZATION_FAILURE' || error.code === 'AUTHENTICATION_FAILURE'
+          ? 'unauthorized'
+          : 'error'
+    );
+  }, []);
+
+  const loadWorkspace = useCallback(
+    async (viewer: User) => {
+      const [profilesResult, candidatesResult, ratingsResult] = await Promise.all([
+        repository.listVisibleProfiles(viewer),
+        repository.listCandidates(viewer),
+        repository.listRatings(viewer)
+      ]);
+      const panelsResult = await repository.listPanels(viewer);
+
+      if (!profilesResult.ok) {
+        reportError(profilesResult.error);
       } else {
-        sessionStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
-        localStorage.removeItem(CURRENT_USER_KEY);
-        localStorage.setItem(REMEMBER_ME_KEY, '0');
+        setUsers(profilesResult.data);
       }
+
+      if (!candidatesResult.ok) {
+        reportError(candidatesResult.error);
+      } else {
+        setStudents(candidatesResult.data);
+      }
+
+      if (!ratingsResult.ok) {
+        reportError(ratingsResult.error);
+      } else {
+        setRatings((prev) =>
+          mergeRatingsPreservingPending(
+            ratingsResult.data.map(normalizeRating),
+            prev,
+            new Set([...pendingByKeyRef.current.keys(), ...inFlightKeysRef.current])
+          )
+        );
+      }
+      if (panelsResult.ok) setPanels(panelsResult.data);
+      if (candidatesResult.ok) {
+        setSyncStatus(appMode === 'offline-demo' ? 'offline' : 'ready');
+        if (profilesResult.ok && ratingsResult.ok) setLastError(null);
+      }
+    },
+    [appMode, reportError, repository]
+  );
+
+  const refreshFromServer = useCallback(async () => {
+    setSyncStatus('loading');
+    const sessionResult = await repository.getSession();
+    if (!sessionResult.ok) {
+      reportError(sessionResult.error);
+      setCurrentUser(null);
       return;
     }
 
-    localStorage.removeItem(CURRENT_USER_KEY);
-    sessionStorage.removeItem(CURRENT_USER_KEY);
-  }, [currentUser, rememberMe]);
+    setIsDemoSession(sessionResult.data.isDemoSession);
+    setCurrentUser(sessionResult.data.user);
 
-  // listen for storage events to sync across tabs
+    if (!sessionResult.data.user) {
+      setStudents([]);
+      setRatings([]);
+      setSyncStatus(appMode === 'offline-demo' ? 'offline' : 'ready');
+      return;
+    }
+
+    await loadWorkspace(sessionResult.data.user);
+  }, [appMode, loadWorkspace, reportError, repository]);
+
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
+
   useEffect(() => {
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'interview_students' && e.newValue) {
-        setStudents(JSON.parse(e.newValue));
-      }
-      if (e.key === 'interview_ratings' && e.newValue) {
-        setRatings(JSON.parse(e.newValue));
-      }
+    clearLegacyAuthStorage();
+    void refreshFromServer();
+  }, [refreshFromServer]);
+
+  // Realtime subscriptions in connected mode (best-effort; errors surface via syncStatus).
+  useEffect(() => {
+    if (appMode !== 'connected' || !currentUser) return;
+
+    const sb = createBrowserSupabaseClient();
+    if (!sb) return;
+
+    const reloadLists = () => {
+      const viewer = currentUserRef.current;
+      if (!viewer) return;
+      void loadWorkspace(viewer);
     };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
+
+    const channel = sb
+      .channel(`dashboard-live-${currentUser.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ratings' }, () => {
+        const viewer = currentUserRef.current;
+        if (!viewer) return;
+        void repository.listRatings(viewer).then((result) => {
+          if (!result.ok) {
+            reportError(result.error);
+            return;
+          }
+          setRatings((prev) =>
+            mergeRatingsPreservingPending(
+              result.data.map(normalizeRating),
+              prev,
+              new Set([...pendingByKeyRef.current.keys(), ...inFlightKeysRef.current])
+            )
+          );
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'candidates' }, reloadLists)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, reloadLists)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+        const viewer = currentUserRef.current;
+        if (!viewer) return;
+        void repository.listVisibleProfiles(viewer).then((result) => {
+          if (!result.ok) {
+            reportError(result.error);
+            return;
+          }
+          setUsers(result.data);
+          const me = result.data.find((user) => user.id === viewer.id);
+          if (me) {
+            setCurrentUser((prev) => (prev && prev.id === me.id ? { ...prev, ...me, panelIds: me.panelIds || prev.panelIds } : prev));
+          }
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'panel_memberships' }, reloadLists)
+      .subscribe();
+
+    return () => {
+      void sb.removeChannel(channel);
+    };
+  }, [appMode, currentUser?.id, loadWorkspace, reportError, repository]);
+
+  const loginWithPassword = useCallback(
+    async (email: string, password: string) => {
+      clearError();
+      setSyncStatus('loading');
+      const result = await repository.signInWithPassword(email, password);
+      if (!result.ok) {
+        reportError(result.error);
+        return false;
+      }
+      setIsDemoSession(false);
+      setCurrentUser(result.data);
+      void loadWorkspace(result.data);
+      return true;
+    },
+    [clearError, loadWorkspace, reportError, repository]
+  );
+
+  const enterDemoPersona = useCallback(
+    async (personaId: string) => {
+      clearError();
+      setSyncStatus('loading');
+      const result = await repository.enterDemoPersona(personaId);
+      if (!result.ok) {
+        reportError(result.error);
+        return false;
+      }
+      setIsDemoSession(true);
+      setCurrentUser(result.data);
+      await loadWorkspace(result.data);
+      return true;
+    },
+    [clearError, loadWorkspace, reportError, repository]
+  );
+
+  /**
+   * Backward-compatible sync wrapper used by older call sites.
+   * In connected mode this always fails closed (use loginWithPassword).
+   * In offline-demo mode, non-empty password attempts are rejected — use persona entry.
+   */
+  const login = useCallback(
+    (_identifier: string, _pass: string, _nameHint?: string, _rememberMe?: boolean) => {
+      void _identifier;
+      void _pass;
+      void _nameHint;
+      void _rememberMe;
+      setLastError({
+        code: 'AUTHENTICATION_FAILURE',
+        message:
+          appMode === 'offline-demo'
+            ? 'Use a demo persona to continue. Password login is disabled in offline-demo mode.'
+            : 'Use your phone number and password to sign in.'
+      });
+      return false;
+    },
+    [appMode]
+  );
+
+  const logout = useCallback(() => {
+    void (async () => {
+      const result = await repository.signOut();
+      if (!result.ok) reportError(result.error);
+      setCurrentUser(null);
+      setStudents([]);
+      setRatings([]);
+      setViewAsPanelist(false);
+      setSyncStatus(appMode === 'offline-demo' ? 'offline' : 'ready');
+    })();
+  }, [appMode, reportError, repository, setViewAsPanelist]);
+
+  const addStudent = useCallback((student: Student) => {
+    void student;
+    setLastError({
+      code: 'AUTHORIZATION_FAILURE',
+      message: 'Adding candidates from the client is disabled. Use an admin-managed seed/migration.'
+    });
   }, []);
 
-  const login = (phone: string, pass: string, nameHint?: string, remember = true) => {
-    const normalizedPhone = normalizePhoneForLogin(phone.trim());
-    const normalizedPass = pass.trim();
-    const loginUsers = buildLoginUsers(users, INITIAL_USERS);
-    const candidates = loginUsers.filter((u) => normalizePhoneForLogin(u.phone.trim()) === normalizedPhone && u.password.trim() === normalizedPass);
-    if (candidates.length === 0) {
-      return false;
-    }
-
-    let user = candidates[0];
-    const trimmedHint = (nameHint || '').trim().toLowerCase();
-    if (trimmedHint) {
-      const hintMatched = candidates.find(u => u.name.toLowerCase() === trimmedHint);
-      if (hintMatched) {
-        user = hintMatched;
+  const persistRating = useCallback(
+    async (rating: Rating) => {
+      if (!currentUser) {
+        reportError(new AppError('AUTHENTICATION_FAILURE', 'Not signed in'));
+        return;
       }
-    }
 
-    if (user) {
-      setRememberMe(remember);
-      setCurrentUser(user);
-      return true;
-    }
-    return false;
-  };
+      const normalized = normalizeRating({ ...rating, panelistId: currentUser.id });
+      const key = ratingKey(normalized);
+      pendingByKeyRef.current.set(key, normalized);
+      setRatings((prev) => upsertLocalRating(prev, normalized));
 
-  const logout = () => setCurrentUser(null);
+      if (inFlightKeysRef.current.has(key)) return;
+      inFlightKeysRef.current.add(key);
 
-  const addStudent = (newStudent: Student) => {
-    const normalized = enrichStudentWithApplicant(newStudent);
-    setStudents(prev => [...prev, normalized]);
-    if (supabase) {
-      // attempt upsert to 'students' table; table should have a primary key on `id`
-      supabase
-        .from('students')
-        .upsert(toSupabaseStudentPayload(normalized), { onConflict: 'id' })
-        .then(() => {}, (e: unknown) => console.warn('Supabase addStudent failed', e));
-    }
-  };
-
-  const updateRating = (updatedRating: Rating) => {
-    const normalized = normalizeRating(updatedRating);
-    setRatings(prev => {
-      const existingIndex = prev.findIndex(r => r.studentId === normalized.studentId && r.panelistId === normalized.panelistId);
-      if (existingIndex >= 0) {
-        const newRatings = [...prev];
-        newRatings[existingIndex] = normalized;
-        if (supabase) {
-          supabase.from('ratings').upsert(toSupabaseRatingPayload(normalized), { onConflict: 'studentid,panelistid' }).then(() => {}, (e: unknown) => console.warn('supabase upsert rating failed', e));
+      let failed = false;
+      try {
+        while (pendingByKeyRef.current.has(key)) {
+          const payload = pendingByKeyRef.current.get(key);
+          if (!payload) break;
+          pendingByKeyRef.current.delete(key);
+          const result = await repository.upsertRating(currentUser, payload);
+          if (!result.ok) {
+            pendingByKeyRef.current.set(key, payload);
+            reportError(result.error);
+            failed = true;
+            break;
+          }
+          const confirmed = normalizeRating(result.data);
+          if (!pendingByKeyRef.current.has(key)) {
+            setRatings((prev) => upsertLocalRating(prev, confirmed));
+          }
+          setSyncStatus(appMode === 'offline-demo' ? 'offline' : 'ready');
+          setLastError(null);
         }
-        return newRatings;
+      } finally {
+        inFlightKeysRef.current.delete(key);
+        const queued = pendingByKeyRef.current.get(key);
+        if (!failed && queued) void persistRating(queued);
       }
-      if (supabase) {
-        supabase.from('ratings').upsert(toSupabaseRatingPayload(normalized), { onConflict: 'studentid,panelistid' }).then(() => {}, (e: unknown) => console.warn('supabase upsert rating failed', e));
-      }
-      return [...prev, normalized];
-    });
-  };
-
-  const submitRating = (studentId: string, panelistId: string) => {
-    // Ensure rating exists then mark submitted true
-    setRatings(prev => {
-      const existingIndex = prev.findIndex(r => r.studentId === studentId && r.panelistId === panelistId);
-      if (existingIndex >= 0) {
-        const newRatings = [...prev];
-        newRatings[existingIndex] = { ...newRatings[existingIndex], submitted: true };
-        if (supabase) {
-          supabase.from('ratings').upsert(toSupabaseRatingPayload(newRatings[existingIndex]), { onConflict: 'studentid,panelistid' }).then(() => {}, (e: unknown) => console.warn('supabase submit rating failed', e));
-        }
-        return newRatings;
-      }
-      // create minimal rating and mark submitted
-      const newR = normalizeRating({ studentId, panelistId, scores: {}, comment: '', bestDomain: '', domainPriorities: [], active: false, submitted: true } as Rating);
-      if (supabase) {
-        supabase.from('ratings').upsert(toSupabaseRatingPayload(newR), { onConflict: 'studentid,panelistid' }).then(() => {}, (e: unknown) => console.warn('supabase submit rating failed', e));
-      }
-      return [...prev, newR];
-    });
-  };
-
-  const setRatingSubmitted = (studentId: string, panelistId: string, value: boolean) => {
-    setRatings(prev => {
-      const existingIndex = prev.findIndex(r => r.studentId === studentId && r.panelistId === panelistId);
-      if (existingIndex >= 0) {
-        const newRatings = [...prev];
-        newRatings[existingIndex] = { ...newRatings[existingIndex], submitted: value };
-        if (supabase) {
-          supabase.from('ratings').upsert(toSupabaseRatingPayload(newRatings[existingIndex]), { onConflict: 'studentid,panelistid' }).then(() => {}, (e: unknown) => console.warn('supabase update rating failed', e));
-        }
-        return newRatings;
-      }
-      if (value) {
-        const newR = normalizeRating({ studentId, panelistId, scores: {}, comment: '', bestDomain: '', domainPriorities: [], active: false, submitted: true } as Rating);
-        if (supabase) {
-          supabase.from('ratings').upsert(toSupabaseRatingPayload(newR), { onConflict: 'studentid,panelistid' }).then(() => {}, (e: unknown) => console.warn('supabase update rating failed', e));
-        }
-        return [...prev, newR];
-      }
-      return prev;
-    });
-  };
-
-  const getStudentRatings = (studentId: string) => ratings.filter(r => r.studentId === studentId);
-
-  const getOverallScore = (studentId: string) => {
-    const studentRatings = getStudentRatings(studentId);
-    if (studentRatings.length === 0) return 0;
-
-    let totalScore = 0;
-    let count = 0;
-
-    studentRatings.forEach(r => {
-      const values = Object.values(r.scores).filter((value): value is number => typeof value === 'number');
-      if (values.length > 0) {
-        const avg = values.reduce((a, b) => a + b, 0) / values.length;
-        totalScore += avg;
-        count++;
-      }
-    });
-
-    return count === 0 ? 0 : (totalScore / count);
-  };
-
-  return (
-    <DataContext.Provider value={{
-      currentUser,
-      users,
-      students,
-      ratings,
-      login,
-      logout,
-      addStudent,
-      updateRating,
-      submitRating,
-      setRatingSubmitted,
-      getStudentRatings,
-      getOverallScore
-    }}>
-      {children}
-    </DataContext.Provider>
+    },
+    [appMode, currentUser, reportError, repository]
   );
+
+  const updateRating = useCallback(
+    (updatedRating: Rating) => {
+      void persistRating(updatedRating);
+    },
+    [persistRating]
+  );
+
+  const submitRating = useCallback(
+    (studentId: string, panelistId: string) => {
+      if (!currentUser) return;
+      const existing = ratings.find((r) => r.studentId === studentId && r.panelistId === panelistId);
+      const next = normalizeRating({
+        studentId,
+        panelistId: currentUser.id,
+        scores: existing?.scores || {},
+        comment: existing?.comment || '',
+        bestDomain: existing?.bestDomain || '',
+        domainPriorities: existing?.domainPriorities || [],
+        active: existing?.active || false,
+        submitted: true
+      });
+      void persistRating(next);
+    },
+    [currentUser, persistRating, ratings]
+  );
+
+  const setRatingSubmitted = useCallback(
+    (studentId: string, panelistId: string, value: boolean) => {
+      if (!currentUser) return;
+      const existing = ratings.find((r) => r.studentId === studentId && r.panelistId === panelistId);
+      if (!existing && !value) return;
+      const next = normalizeRating({
+        studentId,
+        panelistId: currentUser.id,
+        scores: existing?.scores || {},
+        comment: existing?.comment || '',
+        bestDomain: existing?.bestDomain || '',
+        domainPriorities: existing?.domainPriorities || [],
+        active: existing?.active || false,
+        submitted: value
+      });
+      void persistRating(next);
+    },
+    [currentUser, persistRating, ratings]
+  );
+
+  const setStudentStatus = useCallback(
+    async (studentId: string, status: Student['status']) => {
+      if (!currentUser) {
+        setLastError({
+          code: 'AUTHENTICATION_FAILURE',
+          message: 'Not signed in.'
+        });
+        return false;
+      }
+      const result = await repository.setCandidateStatus(currentUser, studentId, status);
+      if (!result.ok) {
+        reportError(result.error);
+        return false;
+      }
+      setStudents((prev) => prev.map((s) => (s.id === studentId ? result.data : s)));
+      return true;
+    },
+    [currentUser, reportError, repository]
+  );
+
+  const listPanels = useCallback(async () => {
+    if (!currentUser) return panels;
+    const result = await repository.listPanels(currentUser);
+    if (!result.ok) {
+      reportError(result.error);
+      return panels;
+    }
+    setPanels(result.data);
+    return result.data;
+  }, [currentUser, panels, reportError, repository]);
+
+  const createPanelist = useCallback(
+    async (input: {
+      phone: string;
+      password?: string;
+      displayName: string;
+      displayTitle?: string;
+      role?: User['role'];
+      panelIds: number[];
+    }) => {
+      if (!currentUser) return false;
+      const result = await repository.createPanelist(currentUser, input);
+      if (!result.ok) {
+        reportError(result.error);
+        return false;
+      }
+      await loadWorkspace(currentUser);
+      return true;
+    },
+    [currentUser, loadWorkspace, reportError, repository]
+  );
+
+  const updateUser = useCallback(
+    async (
+      userId: string,
+      updates: {
+        displayName?: string;
+        displayTitle?: string;
+        role?: User['role'];
+        isActive?: boolean;
+        phone?: string;
+      }
+    ) => {
+      if (!currentUser) return false;
+      const result = await repository.updateUser(currentUser, userId, updates);
+      if (!result.ok) {
+        reportError(result.error);
+        return false;
+      }
+      setUsers((prev) =>
+        prev.map((user) =>
+          user.id === userId
+            ? {
+                ...user,
+                name: updates.displayName ?? user.name,
+                displayTitle: updates.displayTitle ?? user.displayTitle,
+                role: updates.role ?? user.role,
+                isActive: updates.isActive ?? user.isActive,
+                phone: updates.phone ?? user.phone
+              }
+            : user
+        )
+      );
+      await loadWorkspace(currentUser);
+      return true;
+    },
+    [currentUser, loadWorkspace, reportError, repository]
+  );
+
+  const updatePanelMemberships = useCallback(
+    async (userId: string, panelIds: number[]) => {
+      if (!currentUser) return false;
+      const result = await repository.updatePanelMemberships(currentUser, userId, panelIds);
+      if (!result.ok) {
+        reportError(result.error);
+        return false;
+      }
+      await loadWorkspace(currentUser);
+      return true;
+    },
+    [currentUser, loadWorkspace, reportError, repository]
+  );
+
+  const createCandidate = useCallback(
+    async (input: {
+      regNo: string;
+      name: string;
+      day: InterviewDay;
+      panelId: number;
+      timing: string;
+      status: Student['status'];
+      form?: Student['form'];
+    }) => {
+      if (!currentUser) return false;
+      const result = await repository.createCandidate(currentUser, input);
+      if (!result.ok) {
+        reportError(result.error);
+        return false;
+      }
+      await loadWorkspace(currentUser);
+      return true;
+    },
+    [currentUser, loadWorkspace, reportError, repository]
+  );
+
+  const updateCandidate = useCallback(
+    async (
+      candidateId: string,
+      updates: {
+        regNo?: string;
+        name?: string;
+        day?: InterviewDay;
+        panelId?: number;
+        timing?: string;
+        status?: Student['status'];
+        isActive?: boolean;
+        form?: Student['form'];
+      }
+    ) => {
+      if (!currentUser) return false;
+      const result = await repository.updateCandidate(currentUser, candidateId, updates);
+      if (!result.ok) {
+        reportError(result.error);
+        return false;
+      }
+      setStudents((prev) =>
+        prev.map((student) =>
+          student.id === candidateId
+            ? {
+                ...student,
+                name: updates.name ?? student.name,
+                regNo: updates.regNo ?? student.regNo,
+                day: updates.day ?? student.day,
+                panelId: updates.panelId ?? student.panelId,
+                timing: updates.timing ?? student.timing,
+                status: updates.status ?? student.status,
+                isActive: updates.isActive ?? student.isActive,
+                form: updates.form ? { ...student.form, ...updates.form } : student.form
+              }
+            : student
+        )
+      );
+      await loadWorkspace(currentUser);
+      return true;
+    },
+    [currentUser, loadWorkspace, reportError, repository]
+  );
+
+  const getStudentRatings = useCallback(
+    (studentId: string) => ratings.filter((r) => r.studentId === studentId),
+    [ratings]
+  );
+
+  const getOverallScore = useCallback(
+    (studentId: string) => {
+      const studentRatings = getStudentRatings(studentId);
+      if (studentRatings.length === 0) return 0;
+
+      let totalScore = 0;
+      let count = 0;
+
+      studentRatings.forEach((r) => {
+        const interviewScore = r.scores['Interview Score'];
+        if (typeof interviewScore === 'number') {
+          totalScore += interviewScore;
+          count++;
+          return;
+        }
+        const values = Object.values(r.scores).filter((value): value is number => typeof value === 'number');
+        if (values.length > 0) {
+          totalScore += values.reduce((a, b) => a + b, 0) / values.length;
+          count++;
+        }
+      });
+
+      return count === 0 ? 0 : totalScore / count;
+    },
+    [getStudentRatings]
+  );
+
+  const value: DataContextType = {
+    appMode,
+    configSummary: config.summary,
+    isDemoSession,
+    syncStatus,
+    lastError,
+    clearError,
+    currentUser,
+    users,
+    students,
+    ratings,
+    demoPersonas: DEMO_PERSONAS,
+    loginWithPassword,
+    enterDemoPersona,
+    login,
+    logout,
+    addStudent,
+    updateRating,
+    submitRating,
+    setRatingSubmitted,
+    setStudentStatus,
+    listPanels,
+    createPanelist,
+    updateUser,
+    updatePanelMemberships,
+    createCandidate,
+    updateCandidate,
+    getStudentRatings,
+    getOverallScore,
+    refreshFromServer,
+    viewAsPanelist,
+    setViewAsPanelist
+  };
+
+  return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 };

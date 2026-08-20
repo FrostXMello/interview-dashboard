@@ -44,6 +44,9 @@ yarn-error.log*
 # local backups
 /backups
 
+# local interview import payloads (contain candidate PII)
+/scripts/data/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

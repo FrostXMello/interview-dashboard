@@ -1,21 +1,15 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { DataProvider } from "@/context/DataProvider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
+/**
+ * WHY local font stack instead of next/font Google fetch:
+ * Builds must succeed without outbound TLS to fonts.googleapis.com
+ * (corporate proxies / offline CI). Visual identity stays dark App Router shell.
+ */
 export const metadata: Metadata = {
   title: "Interview Dashboard Pro",
-  description: "Real-time Interview Rating System",
+  description: "Interview Rating System",
 };
 
 export default function RootLayout({
@@ -24,10 +18,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-950 text-white min-h-screen`}
-      >
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <body className="antialiased bg-gray-950 text-white min-h-screen font-sans" suppressHydrationWarning>
         <DataProvider>
           {children}
         </DataProvider>
@@ -35,4 +27,3 @@ export default function RootLayout({
     </html>
   );
 }
-

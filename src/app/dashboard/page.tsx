@@ -1,20 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useData } from '@/context/DataProvider';
-import { CRITERIA, DOMAIN_OPTIONS, RANKING_TABS, DOMAIN_PRIORITY_POINTS } from '@/lib/data';
+import { canManageCandidateStatus } from '@/lib/auth/roles';
+import { CRITERIA, DOMAIN_OPTIONS, DOMAIN_SHORT_LABELS, RANKING_TABS, DOMAIN_PRIORITY_POINTS, canonicalizeDomain, extractPreferredDomains, skillRating, SKILL_LABELS, type InterviewDay } from '@/lib/data';
 import { useRouter } from 'next/navigation';
-import { LogOut, Star, User as UserIcon, CheckCircle, ChevronRight, BarChart3, Users, Save, Search } from 'lucide-react';
+import { LogOut, Star, User as UserIcon, CheckCircle, ChevronRight, BarChart3, Users, Save, Search, Loader2, Shield } from 'lucide-react';
 import clsx from 'clsx';
-
-const DOMAIN_LABELS: Record<string, string> = {
-  'Content Creation & Social Media Management (Design, Writing, Scheduling)': 'Content & Social',
-  'Event Management & Operations (Planning, Execution, Venue Setup)': 'Events & Ops',
-  'Outreach & Public Relations (Connecting with other student bodies, promoting events)': 'Outreach & PR',
-  'Documentation & Administration (Record keeping, Email correspondence)': 'Documentation'
-};
-
-const SKILL_ORDER = ['Communication', 'Time Management', 'Team Work', 'Graphic Design'] as const;
+import { SuperAdminControlCenter } from '@/components/super-admin/SuperAdminControlCenter';
 
 const normalizeAnswerSpacing = (text?: string) => {
   if (!text) return '—';
@@ -27,18 +20,6 @@ const normalizeAnswerSpacing = (text?: string) => {
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-};
-
-const extractDomains = (raw?: string) => {
-  if (!raw) return [] as string[];
-
-  const matched = Object.keys(DOMAIN_LABELS).filter((full) => raw.includes(full));
-  if (matched.length > 0) return matched;
-
-  return raw
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
 };
 
 const parseTimingStartMinutes = (timing: string) => {
@@ -61,38 +42,97 @@ const parseTimingStartMinutes = (timing: string) => {
 
 export default function Dashboard() {
   const router = useRouter();
-  const { currentUser, students, users, ratings, updateRating, submitRating, setRatingSubmitted, logout, getOverallScore, getStudentRatings } = useData();
+  const {
+    currentUser,
+    students,
+    users,
+    ratings,
+    updateRating,
+    submitRating,
+    setRatingSubmitted,
+    setStudentStatus,
+    logout,
+    getOverallScore,
+    getStudentRatings,
+    appMode,
+    isDemoSession,
+    lastError,
+    syncStatus,
+    viewAsPanelist,
+    setViewAsPanelist
+  } = useData();
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<'candidates' | 'evaluation' | 'leaderboard'>('candidates');
-  const [dayTab, setDayTab] = useState<'day-1' | 'day-2'>('day-1');
+  const [listFilter, setListFilter] = useState<'all' | 'unscheduled' | 'day-1' | 'day-2'>('all');
   const [activeTab, setActiveTab] = useState<'panel1' | 'panel2' | 'all'>('all');
   const [rankingTab, setRankingTab] = useState<(typeof RANKING_TABS)[number]>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
+  const commentDirtyRef = useRef(false);
 
   useEffect(() => {
-    if (currentUser) return;
+    if (currentUser || syncStatus === 'loading') return;
     const timer = window.setTimeout(() => {
       router.replace('/');
-    }, 200);
+    }, 400);
     return () => window.clearTimeout(timer);
-  }, [currentUser, router]);
+  }, [currentUser, router, syncStatus]);
 
   useEffect(() => {
-    if (!currentUser) return;
+    commentDirtyRef.current = false;
+  }, [selectedStudentId, currentUser?.id]);
+
+  useEffect(() => {
+    if (!currentUser || !selectedStudentId || !commentDirtyRef.current) return;
+    const timer = window.setTimeout(() => {
+      const rating = ratings.find(
+        (r) => r.studentId === selectedStudentId && r.panelistId === currentUser.id
+      );
+      if ((rating?.comment || '') === commentDraft) {
+        commentDirtyRef.current = false;
+        return;
+      }
+      commentDirtyRef.current = false;
+      updateRating({
+        studentId: selectedStudentId,
+        panelistId: currentUser.id,
+        scores: rating?.scores || {},
+        comment: commentDraft,
+        bestDomain: rating?.bestDomain || '',
+        domainPriorities: rating?.domainPriorities || [],
+        submitted: rating?.submitted || false,
+        active: rating?.active || false
+      });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [commentDraft, currentUser, selectedStudentId, ratings, updateRating]);
+
+  useEffect(() => {
+    if (!currentUser || commentDirtyRef.current) return;
     const rating = ratings.find(
       (r) => r.studentId === selectedStudentId && r.panelistId === currentUser.id
     );
-    // Sync draft when switching candidates or when rating comment updates externally (e.g. realtime).
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional controlled-field reset
-    setCommentDraft(rating?.comment || '');
+    const next = rating?.comment || '';
+    setCommentDraft((prev) => (prev === next ? prev : next));
   }, [currentUser, selectedStudentId, ratings]);
 
-  if (!currentUser) return null;
+  if (!currentUser) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-gray-950 p-4 text-gray-400">
+        <Loader2 className="mb-3 h-6 w-6 animate-spin text-blue-500" />
+        <p className="text-sm">{syncStatus === 'loading' ? 'Loading session…' : 'Redirecting to sign in…'}</p>
+      </div>
+    );
+  }
+
+  if (currentUser.role === 'super_admin' && !viewAsPanelist) {
+    return <SuperAdminControlCenter />;
+  }
 
   const selectedStudent = students.find(s => s.id === selectedStudentId);
 
-  const getStudentDay = (studentId: string) => studentId.startsWith('d2-') ? 'day-2' : 'day-1';
+  const getStudentDay = (student: { day?: InterviewDay; id: string }): InterviewDay =>
+    student.day || (student.id.startsWith('d2-') ? 'day-2' : 'day-1');
 
   const completedStudentIds = new Set(
     ratings
@@ -104,10 +144,18 @@ export default function Dashboard() {
   const normalizedSearch = searchQuery.trim().toLowerCase();
 
   const filteredStudents = students.filter(s => {
-    if (getStudentDay(s.id) !== dayTab) return false;
-    if (activeTab === 'all') return true;
-    if (activeTab === 'panel1') return s.panelId === 1;
-    if (activeTab === 'panel2') return s.panelId === 2;
+    const day = getStudentDay(s);
+    const isUnscheduled = day === 'unscheduled';
+    if (listFilter === 'unscheduled') return isUnscheduled;
+    if (listFilter === 'day-1') {
+      if (day !== 'day-1') return false;
+    } else if (listFilter === 'day-2') {
+      if (day !== 'day-2') return false;
+    }
+    if (!isUnscheduled) {
+      if (activeTab === 'panel1') return s.panelId === 1;
+      if (activeTab === 'panel2') return s.panelId === 2;
+    }
     return true;
   }).filter((student) => {
     if (!normalizedSearch) return true;
@@ -132,7 +180,9 @@ export default function Dashboard() {
     active: false
   };
 
-  const myDomainPriorities = Array.isArray(myRating.domainPriorities) ? myRating.domainPriorities : [];
+  const myDomainPriorities = (Array.isArray(myRating.domainPriorities) ? myRating.domainPriorities : [])
+    .map((domain) => canonicalizeDomain(domain))
+    .filter((domain): domain is NonNullable<typeof domain> => Boolean(domain));
 
   const hasRatingContent = (rating: typeof myRating) => {
     const hasNumericScore = Object.values(rating.scores).some((value) => typeof value === 'number' && value > 0);
@@ -144,26 +194,31 @@ export default function Dashboard() {
   const handleScoreChange = (criteria: string, val: number) => {
     if (val < 1 || val > 10) return;
     // Toggle: if clicking the same rating again, remove it
-    const current = typeof myRating.scores[criteria] === 'number' ? (myRating.scores[criteria] as number) : undefined;
-    const newScores = { ...myRating.scores } as Record<string, number | string[]>;
+    const current = typeof myRating.scores[criteria] === 'number' ? myRating.scores[criteria] : undefined;
+    const newScores = { ...myRating.scores };
     if (current === val) {
-      // unselect
       delete newScores[criteria];
     } else {
       newScores[criteria] = val;
     }
     updateRating({
       ...myRating,
-      scores: newScores
+      scores: newScores,
+      comment: commentDraft
     });
   };
 
   const handleCommentChange = (val: string) => {
+    commentDirtyRef.current = true;
     setCommentDraft(val);
   };
 
   const commitCommentDraft = () => {
-    if (myRating.comment === commentDraft) return;
+    if (myRating.comment === commentDraft) {
+      commentDirtyRef.current = false;
+      return;
+    }
+    commentDirtyRef.current = false;
     updateRating({ ...myRating, comment: commentDraft });
   };
 
@@ -182,7 +237,8 @@ export default function Dashboard() {
     updateRating({
       ...myRating,
       domainPriorities: next,
-      bestDomain: next[0] || ''
+      bestDomain: next[0] || '',
+      comment: commentDraft
     });
   };
 
@@ -196,7 +252,8 @@ export default function Dashboard() {
     updateRating({
       ...myRating,
       domainPriorities: list,
-      bestDomain: list[0] || ''
+      bestDomain: list[0] || '',
+      comment: commentDraft
     });
   };
 
@@ -207,6 +264,8 @@ export default function Dashboard() {
   };
 
   const handleClearEvaluation = () => {
+    commentDirtyRef.current = false;
+    setCommentDraft('');
     updateRating({
       ...myRating,
       scores: {},
@@ -234,17 +293,19 @@ export default function Dashboard() {
   };
 
   const getDomainPriorityAverage = (studentId: string, domain: string) => {
-    const submittedRatings = ratings.filter((r) => r.studentId === studentId && r.submitted);
-    if (submittedRatings.length === 0) return 0;
+    const liveRatings = ratings.filter((r) => r.studentId === studentId && Array.isArray(r.domainPriorities) && r.domainPriorities.length > 0);
+    if (liveRatings.length === 0) return 0;
 
-    const totalPoints = submittedRatings.reduce((acc, rating) => {
-      const priorities = Array.isArray(rating.domainPriorities) ? rating.domainPriorities : [];
-      const idx = priorities.indexOf(domain);
+    const totalPoints = liveRatings.reduce((acc, rating) => {
+      const priorities = (Array.isArray(rating.domainPriorities) ? rating.domainPriorities : [])
+        .map((item) => canonicalizeDomain(item))
+        .filter((item): item is NonNullable<typeof item> => Boolean(item));
+      const idx = priorities.indexOf(domain as (typeof DOMAIN_OPTIONS)[number]);
       if (idx === -1 || idx > 2) return acc;
       return acc + DOMAIN_PRIORITY_POINTS[idx];
     }, 0);
 
-    return totalPoints / submittedRatings.length;
+    return totalPoints / liveRatings.length;
   };
 
   const rankingRows = students
@@ -265,7 +326,6 @@ export default function Dashboard() {
     .sort((a, b) => b.rankingScore - a.rankingScore);
 
   const visiblePanelFeedback = (selectedStudentId ? getStudentRatings(selectedStudentId) : []).filter((rating) => {
-    if (!rating.submitted) return false;
     return hasRatingContent(rating as typeof myRating);
   });
 
@@ -277,24 +337,64 @@ export default function Dashboard() {
         mobileView === 'candidates' ? 'flex' : 'hidden lg:flex'
       )}>
         <div className="p-4 border-b border-gray-800">
+          {(isDemoSession || appMode === 'offline-demo' || lastError) && (
+            <div className="mb-3 rounded-lg border border-amber-700/40 bg-amber-950/40 px-3 py-2 text-[11px] text-amber-200/90 space-y-1">
+              <div>
+                {appMode === 'offline-demo' || isDemoSession
+                  ? 'Offline demo — synthetic data; not a production auth session.'
+                  : `Sync: ${syncStatus}`}
+              </div>
+              {lastError && <div className="text-red-300">{lastError.message}</div>}
+            </div>
+          )}
           <h2 className="text-xl font-bold flex items-center gap-2">
             <Users className="h-5 w-5 text-blue-500" />
             Candidates
           </h2>
+          {currentUser.role === 'super_admin' && (
+            <button
+              type="button"
+              onClick={() => setViewAsPanelist(false)}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-blue-700/50 bg-blue-950/40 px-3 py-2 text-xs font-medium text-blue-200 hover:bg-blue-900/50"
+            >
+              <Shield className="h-3.5 w-3.5" />
+              Back to Super Admin
+            </button>
+          )}
           <div className="mt-2 text-xs text-gray-500">
             Completed interviews: {filteredStudents.filter((student) => completedStudentIds.has(student.id)).length}
           </div>
           <div className="flex mt-4 gap-1 bg-gray-800 p-1 rounded-lg">
-            {(['day-1', 'day-2'] as const).map(tab => (
+            {([
+              { id: 'all', label: 'All candidates' },
+              { id: 'unscheduled', label: 'Unscheduled' }
+            ] as const).map((tab) => (
               <button
-                key={tab}
-                onClick={() => setDayTab(tab)}
+                key={tab.id}
+                onClick={() => setListFilter(tab.id)}
                 className={clsx(
-                  'flex-1 text-xs py-1.5 rounded-md transition-colors uppercase',
-                  dayTab === tab ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
+                  'flex-1 text-xs py-1.5 rounded-md transition-colors',
+                  listFilter === tab.id ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
                 )}
               >
-                {tab}
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex mt-2 gap-1 bg-gray-800 p-1 rounded-lg">
+            {([
+              { id: 'day-1', label: 'Day 1' },
+              { id: 'day-2', label: 'Day 2' }
+            ] as const).map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setListFilter(tab.id)}
+                className={clsx(
+                  'flex-1 text-xs py-1.5 rounded-md transition-colors',
+                  listFilter === tab.id ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
+                )}
+              >
+                {tab.label}
               </button>
             ))}
           </div>
@@ -308,7 +408,7 @@ export default function Dashboard() {
                   activeTab === tab ? "bg-blue-600 text-white shadow" : "text-gray-400 hover:text-gray-200"
                 )}
               >
-                {tab === 'all' ? 'All' : tab.replace('panel', 'Panel ')}
+                  {tab === 'all' ? 'All' : tab.replace('panel', 'Panel ')}
               </button>
             ))}
           </div>
@@ -343,7 +443,11 @@ export default function Dashboard() {
                 <div className="flex justify-between items-start">
                   <div>
                     <div className="font-semibold text-sm">{student.name}</div>
-                    <div className="text-xs text-gray-500 mt-1">{student.regNo} • {student.timing}</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {student.day === 'unscheduled'
+                        ? `${student.regNo} • Unscheduled • All panels`
+                        : `${student.regNo} • ${student.timing}`}
+                    </div>
                   </div>
                   <div className={clsx(
                     "text-xs px-2 py-0.5 rounded-full",
@@ -361,7 +465,7 @@ export default function Dashboard() {
             );
           }) : (
             <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-4 text-sm text-gray-500">
-              No candidates found for this search.
+              {syncStatus === 'loading' ? 'Loading candidates…' : 'No candidates found for this search.'}
             </div>
           )}
         </div>
@@ -373,9 +477,18 @@ export default function Dashboard() {
              </div>
              <div className="flex-1 overflow-hidden">
                <div className="text-sm font-medium truncate">{currentUser.name}</div>
-               <div className="text-xs text-gray-500 capitalize">{currentUser.role}</div>
+               <div className="text-xs text-gray-500 capitalize">
+                 {currentUser.role === 'super_admin' && viewAsPanelist
+                   ? 'Interviewing as panelist'
+                   : currentUser.displayTitle || currentUser.role}
+               </div>
              </div>
-             <button onClick={() => { logout(); router.push('/'); }} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-red-400 transition-colors">
+             <button
+               type="button"
+               aria-label="Log out"
+               onClick={() => { logout(); router.push('/'); }}
+               className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-red-400 transition-colors"
+             >
                <LogOut className="h-5 w-5" />
              </button>
            </div>
@@ -427,12 +540,12 @@ export default function Dashboard() {
                       <div>
                         <div className="font-semibold text-gray-400 mb-2">Preferred Domains:</div>
                         <div className="flex flex-wrap gap-2">
-                          {extractDomains(selectedStudent.form.domains).length > 0 ? extractDomains(selectedStudent.form.domains).map((domain) => (
+                          {extractPreferredDomains(selectedStudent.form.domains).length > 0 ? extractPreferredDomains(selectedStudent.form.domains).map((domain) => (
                             <span
                               key={domain}
                               className="inline-flex items-center px-2.5 py-1 rounded-full border border-blue-500/35 bg-blue-500/10 text-blue-200 text-xs font-semibold"
                             >
-                              {DOMAIN_LABELS[domain] || domain}
+                              {DOMAIN_SHORT_LABELS[domain] || domain}
                             </span>
                           )) : (
                             <span className="text-gray-400">—</span>
@@ -460,10 +573,10 @@ export default function Dashboard() {
                         <div>
                           <div className="font-semibold text-gray-400 mb-1">Self-Rated Skills</div>
                           <div className="grid grid-cols-2 gap-2">
-                            {SKILL_ORDER.map((key) => (
+                            {SKILL_LABELS.map((key) => (
                               <div key={key} className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2 text-xs">
                                 <span className="text-gray-500">{key}</span>
-                                <div className="text-gray-200 font-semibold mt-0.5">{selectedStudent.form?.proficiencies?.[key] || '—'}</div>
+                                <div className="text-gray-200 font-semibold mt-0.5">{skillRating(selectedStudent.form?.proficiencies, key)}</div>
                               </div>
                             ))}
                           </div>
@@ -650,26 +763,32 @@ export default function Dashboard() {
 
                     <div className="space-y-4">
                       {visiblePanelFeedback.length > 0 ? (
-                        visiblePanelFeedback.map((rating, idx) => {
+                        visiblePanelFeedback.map((rating) => {
                           const panelist = users.find(u => u.id === rating.panelistId);
-                          if (!panelist) return null;
-                          const isMe = panelist.id === currentUser.id;
+                          const panelistName = panelist?.name || 'Panelist';
+                          const panelistRole = panelist?.displayTitle || panelist?.role || 'panelist';
+                          const isMe = rating.panelistId === currentUser.id;
 
-                          // Calculate average for this panelist
-                          const scores = Object.values(rating.scores).filter((value): value is number => typeof value === 'number');
-                          const avg = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : '-';
+                          const interviewScore =
+                            typeof rating.scores['Interview Score'] === 'number'
+                              ? rating.scores['Interview Score']
+                              : null;
+                          const displayScore = interviewScore !== null ? String(interviewScore) : '-';
 
                           return (
-                            <div key={idx} className={clsx('p-4 rounded-lg border', isMe ? 'bg-blue-900/10 border-blue-500/30' : 'bg-gray-800/50 border-gray-700')}>
+                            <div key={rating.panelistId} className={clsx('p-4 rounded-lg border', isMe ? 'bg-blue-900/10 border-blue-500/30' : 'bg-gray-800/50 border-gray-700')}>
                               <div className="flex justify-between items-start mb-2">
                                 <div>
                                   <div className="font-semibold text-sm flex items-center gap-2">
-                                    {panelist.name}
+                                    {panelistName}
                                     {isMe && <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded uppercase">You</span>}
+                                    {!rating.submitted && (
+                                      <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded uppercase">Live</span>
+                                    )}
                                   </div>
-                                  <div className="text-xs text-gray-500 capitalize">{panelist.role}</div>
+                                  <div className="text-xs text-gray-500 capitalize">{panelistRole}</div>
                                 </div>
-                                <div className="text-2xl font-bold text-gray-200">{avg}</div>
+                                <div className="text-2xl font-bold text-gray-200">{displayScore}</div>
                               </div>
                               {Array.isArray(rating.domainPriorities) && rating.domainPriorities.length > 0 && (
                                 <div className="text-xs text-cyan-300 mb-1">
@@ -689,14 +808,24 @@ export default function Dashboard() {
                   </div>
 
                   {/* Status Card */}
-                  {currentUser.role === 'superadmin' && (
+                  {canManageCandidateStatus(currentUser.role) && selectedStudent && (
                     <div className="bg-gray-900/30 border border-amber-900/30 rounded-xl p-6">
-                      <h3 className="text-lg font-semibold mb-4 text-amber-500">Super Admin Controls</h3>
+                      <h3 className="text-lg font-semibold mb-4 text-amber-500">Admin Controls</h3>
                       <div className="space-y-3">
-                        <div className="text-sm text-gray-400">Manage student status</div>
+                        <div className="text-sm text-gray-400">Manage candidate status</div>
                         <div className="flex gap-2">
-                          {['pending', 'interviewing', 'completed'].map(st => (
-                            <button key={st} className="px-3 py-1 bg-gray-800 rounded text-xs capitalize hover:bg-gray-700 border border-gray-700">
+                          {(['pending', 'interviewing', 'completed'] as const).map((st) => (
+                            <button
+                              key={st}
+                              type="button"
+                              onClick={() => {
+                                void setStudentStatus(selectedStudent.id, st);
+                              }}
+                              className={clsx(
+                                'px-3 py-1 bg-gray-800 rounded text-xs capitalize hover:bg-gray-700 border border-gray-700',
+                                selectedStudent.status === st && 'border-amber-500 text-amber-300'
+                              )}
+                            >
                               Set {st}
                             </button>
                           ))}
@@ -756,7 +885,7 @@ export default function Dashboard() {
                             : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700'
                         )}
                       >
-                        {tab === 'all' ? 'All' : tab}
+                        {tab === 'all' ? 'All' : DOMAIN_SHORT_LABELS[tab]}
                       </button>
                     ))}
                   </div>
