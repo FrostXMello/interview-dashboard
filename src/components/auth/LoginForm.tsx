@@ -64,9 +64,7 @@ export function LoginForm({
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="block w-full min-h-11 pl-10 pr-12 bg-gray-950 border border-gray-700 rounded-lg py-3 text-base text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500 outline-none"
-              placeholder="6-digit password"
-              inputMode="numeric"
-              maxLength={12}
+              placeholder="Password"
             />
             <button
               type="button"

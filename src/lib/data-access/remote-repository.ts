@@ -1,6 +1,7 @@
 import { canManageCandidateStatus, isAppRole, type AppRole } from '@/lib/auth/roles';
 import { canWriteRatingAs, validateRatingPayload } from '@/lib/auth/authorization';
 import { normalizePhoneE164 } from '@/lib/auth/phone';
+import { expandLoginPasswords } from '@/lib/auth/password-aliases';
 import { mapInterviewDay, type InterviewDay, type Rating, type Student, type User } from '@/lib/data';
 import { AppError, failure, isMissingAuthSession, success, toAppError, type OperationResult } from '@/lib/errors';
 import type { InterviewRepository, SessionSnapshot } from '@/lib/data-access/types';
@@ -212,22 +213,27 @@ export class RemoteSupabaseRepository implements InterviewRepository {
       const trimmed = identifier.trim();
       const phone = normalizePhoneE164(trimmed);
       const digits = phone ? phone.replace(/\D/g, '').slice(-10) : '';
-      const attempts: Array<{ phone: string; password: string } | { email: string; password: string }> = [];
-
+      const secrets = expandLoginPasswords(password);
+      const identifiers: Array<{ phone: string } | { email: string }> = [];
       if (phone && !trimmed.includes('@') && digits.length === 10) {
-        attempts.push({ email: `${digits}@interviews.local`, password });
-        attempts.push({ phone, password });
+        identifiers.push({ email: `${digits}@interviews.local` });
+        identifiers.push({ phone });
       } else {
-        attempts.push(phone && !trimmed.includes('@') ? { phone, password } : { email: trimmed, password });
+        identifiers.push(phone && !trimmed.includes('@') ? { phone } : { email: trimmed });
       }
 
       let lastError: { message?: string } | null = null;
-      for (const credentials of attempts) {
-        const { data, error } = await sb.auth.signInWithPassword(credentials);
-        if (!error && data.user) {
-          return this.loadUser(data.user.id);
+      for (const secret of secrets) {
+        for (const target of identifiers) {
+          const credentials = 'phone' in target
+            ? { phone: target.phone, password: secret }
+            : { email: target.email, password: secret };
+          const { data, error } = await sb.auth.signInWithPassword(credentials);
+          if (!error && data.user) {
+            return this.loadUser(data.user.id);
+          }
+          lastError = error;
         }
-        lastError = error;
       }
 
       return failure(

@@ -176,7 +176,7 @@ describe('login uses Supabase Auth credentials, not local password compare', () 
   it('remote repository signs in with phone+password via Auth API', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/lib/data-access/remote-repository.ts'), 'utf8');
     expect(source).toMatch(/signInWithPassword\(/);
-    expect(source).toMatch(/\{ phone, password \}/);
+    expect(source).toMatch(/phone: target\.phone, password: secret/);
     expect(source).not.toMatch(/allowed_phones/);
   });
 });
