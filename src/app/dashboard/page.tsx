@@ -144,6 +144,7 @@ export default function Dashboard() {
   const normalizedSearch = searchQuery.trim().toLowerCase();
 
   const filteredStudents = students.filter(s => {
+    if (s.isActive === false) return false;
     const day = getStudentDay(s);
     const isUnscheduled = day === 'unscheduled';
     if (listFilter === 'unscheduled') return isUnscheduled;
@@ -278,7 +279,7 @@ export default function Dashboard() {
   };
 
   // Calculate stats
-  const studentsWithScores = students.map(s => ({
+  const studentsWithScores = students.filter((s) => s.isActive !== false).map(s => ({
     ...s,
     avgScore: getOverallScore(s.id)
   })).sort((a, b) => b.avgScore - a.avgScore);
@@ -309,6 +310,7 @@ export default function Dashboard() {
   };
 
   const rankingRows = students
+    .filter((student) => student.isActive !== false)
     .map((student) => {
       const avgScore = getOverallScore(student.id);
       const domainPoints = rankingTab === 'all' ? 0 : getDomainPriorityAverage(student.id, rankingTab);
