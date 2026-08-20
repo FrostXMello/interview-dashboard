@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useData } from '@/context/DataProvider';
 import { canManageCandidateStatus } from '@/lib/auth/roles';
-import { CRITERIA, DOMAIN_OPTIONS, DOMAIN_SHORT_LABELS, RANKING_TABS, DOMAIN_PRIORITY_POINTS, canonicalizeDomain, extractPreferredDomains, skillRating, SKILL_LABELS, type InterviewDay } from '@/lib/data';
+import { CRITERIA, DOMAIN_OPTIONS, DOMAIN_SHORT_LABELS, RANKING_TABS, DOMAIN_PRIORITY_POINTS, canonicalizeDomain, extractPreferredDomains, skillRating, SKILL_LABELS, type DomainOption, type InterviewDay } from '@/lib/data';
 import { useRouter } from 'next/navigation';
 import { LogOut, Star, User as UserIcon, CheckCircle, ChevronRight, BarChart3, Users, Save, Search, Loader2, Shield } from 'lucide-react';
 import clsx from 'clsx';
@@ -222,9 +222,9 @@ export default function Dashboard() {
     updateRating({ ...myRating, comment: commentDraft });
   };
 
-  const handlePriorityDomainToggle = (domain: string) => {
+  const handlePriorityDomainToggle = (domain: DomainOption) => {
     const existing = myDomainPriorities;
-    let next: string[];
+    let next: DomainOption[];
 
     if (existing.includes(domain)) {
       next = existing.filter((item) => item !== domain);
@@ -292,7 +292,7 @@ export default function Dashboard() {
     }
   };
 
-  const getDomainPriorityAverage = (studentId: string, domain: string) => {
+  const getDomainPriorityAverage = (studentId: string, domain: DomainOption) => {
     const liveRatings = ratings.filter((r) => r.studentId === studentId && Array.isArray(r.domainPriorities) && r.domainPriorities.length > 0);
     if (liveRatings.length === 0) return 0;
 
@@ -300,7 +300,7 @@ export default function Dashboard() {
       const priorities = (Array.isArray(rating.domainPriorities) ? rating.domainPriorities : [])
         .map((item) => canonicalizeDomain(item))
         .filter((item): item is NonNullable<typeof item> => Boolean(item));
-      const idx = priorities.indexOf(domain as (typeof DOMAIN_OPTIONS)[number]);
+      const idx = priorities.indexOf(domain);
       if (idx === -1 || idx > 2) return acc;
       return acc + DOMAIN_PRIORITY_POINTS[idx];
     }, 0);
