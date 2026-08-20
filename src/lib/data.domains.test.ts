@@ -6,10 +6,28 @@ describe('domain helpers', () => {
     const raw =
       'Content Creation & Social Media Management (Design, Writing, Scheduling), Event Management & Operations (Planning, Execution, Venue Setup), Outreach & Public Relations (Connecting with other student bodies, promoting events)';
     expect(extractPreferredDomains(raw)).toEqual([
-      'Outreach and Public Relations',
       'Content Creation and Social Media',
-      'Event Management and Operations'
+      'Event Management and Operations',
+      'Outreach and Public Relations'
     ]);
+  });
+
+  it('keeps official comma-separated domains in applicant order', () => {
+    expect(
+      extractPreferredDomains(
+        'Event Management and Operations, Outreach and Public Relations, Graphic Designing & Video Editing'
+      )
+    ).toEqual([
+      'Event Management and Operations',
+      'Outreach and Public Relations',
+      'Graphic Designing & Video Editing'
+    ]);
+  });
+
+  it('does not split on commas inside domain parentheses', () => {
+    expect(
+      extractPreferredDomains('Content Creation & Social Media Management (Design, Writing, Scheduling)')
+    ).toEqual(['Content Creation and Social Media']);
   });
 
   it('canonicalizes legacy short names', () => {

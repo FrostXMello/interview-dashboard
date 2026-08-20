@@ -130,6 +130,7 @@ export default function Dashboard() {
   }
 
   const selectedStudent = students.find(s => s.id === selectedStudentId);
+  const selectedPreferredDomains = extractPreferredDomains(selectedStudent?.form?.domains);
 
   const getStudentDay = (student: { day?: InterviewDay; id: string }): InterviewDay =>
     student.day || (student.id.startsWith('d2-') ? 'day-2' : 'day-1');
@@ -430,6 +431,7 @@ export default function Dashboard() {
             const computedStatus = completedStudentIds.has(student.id)
               ? 'completed'
               : student.status;
+            const preferredDomains = extractPreferredDomains(student.form?.domains);
 
             return (
               <button
@@ -450,6 +452,18 @@ export default function Dashboard() {
                         ? `${student.regNo} • Unscheduled • All panels`
                         : `${student.regNo} • ${student.timing}`}
                     </div>
+                    {preferredDomains.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {preferredDomains.map((domain) => (
+                          <span
+                            key={domain}
+                            className="inline-flex max-w-full items-center rounded-full border border-blue-500/25 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-tight text-blue-200"
+                          >
+                            {DOMAIN_SHORT_LABELS[domain] || domain}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className={clsx(
                     "text-xs px-2 py-0.5 rounded-full",
@@ -512,6 +526,18 @@ export default function Dashboard() {
                   <span>•</span>
                   <span>{selectedStudent.timing}</span>
                 </div>
+                {selectedPreferredDomains.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {selectedPreferredDomains.map((domain) => (
+                      <span
+                        key={`header-${domain}`}
+                        className="inline-flex items-center px-2.5 py-1 rounded-full border border-blue-500/35 bg-blue-500/10 text-blue-200 text-xs font-semibold"
+                      >
+                        {domain}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="text-left sm:text-right">
                 <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">Overall Score</div>
@@ -542,15 +568,15 @@ export default function Dashboard() {
                       <div>
                         <div className="font-semibold text-gray-400 mb-2">Preferred Domains:</div>
                         <div className="flex flex-wrap gap-2">
-                          {extractPreferredDomains(selectedStudent.form.domains).length > 0 ? extractPreferredDomains(selectedStudent.form.domains).map((domain) => (
+                          {selectedPreferredDomains.length > 0 ? selectedPreferredDomains.map((domain) => (
                             <span
                               key={domain}
                               className="inline-flex items-center px-2.5 py-1 rounded-full border border-blue-500/35 bg-blue-500/10 text-blue-200 text-xs font-semibold"
                             >
-                              {DOMAIN_SHORT_LABELS[domain] || domain}
+                              {domain}
                             </span>
                           )) : (
-                            <span className="text-gray-400">—</span>
+                            <span className="text-gray-400">{selectedStudent.form.domains?.trim() || '—'}</span>
                           )}
                         </div>
                       </div>
@@ -646,9 +672,14 @@ export default function Dashboard() {
                         >
                           <div className="flex items-center justify-between gap-2">
                             <span>{domain}</span>
-                            {myDomainPriorities.includes(domain) && (
-                              <span className="text-xs font-black text-cyan-200">P{myDomainPriorities.indexOf(domain) + 1}</span>
-                            )}
+                            <span className="flex items-center gap-1">
+                              {selectedPreferredDomains.includes(domain) && (
+                                <span className="text-[10px] uppercase tracking-wide text-blue-300">Preferred</span>
+                              )}
+                              {myDomainPriorities.includes(domain) && (
+                                <span className="text-xs font-black text-cyan-200">P{myDomainPriorities.indexOf(domain) + 1}</span>
+                              )}
+                            </span>
                           </div>
                         </button>
                       ))}

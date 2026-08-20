@@ -88,17 +88,42 @@ export function canonicalizeDomain(value: string): DomainOption | null {
   return null;
 }
 
+/** Split on commas that are not inside parentheses, so "(Design, Writing)" stays one domain. */
+function splitDomainParts(raw: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let depth = 0;
+  for (const ch of raw) {
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    if (ch === ',' && depth === 0) {
+      if (current.trim()) parts.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
 export function extractPreferredDomains(raw?: string): DomainOption[] {
   if (!raw) return [];
+  const found: DomainOption[] = [];
+  const add = (domain: DomainOption | null) => {
+    if (domain && !found.includes(domain)) found.push(domain);
+  };
+
+  for (const part of splitDomainParts(raw)) {
+    add(canonicalizeDomain(part));
+  }
+  if (found.length > 0) return found;
+
   const lower = raw.toLowerCase();
-  const matched = DOMAIN_NEEDLES
-    .filter(({ needles }) => needles.some((needle) => lower.includes(needle)))
-    .map(({ domain }) => domain);
-  if (matched.length > 0) return matched;
-  return raw
-    .split(',')
-    .map((part) => canonicalizeDomain(part))
-    .filter((domain): domain is DomainOption => Boolean(domain));
+  for (const { domain, needles } of DOMAIN_NEEDLES) {
+    if (needles.some((needle) => lower.includes(needle))) add(domain);
+  }
+  return found;
 }
 
 export const SKILL_LABELS = ['Communication', 'Time Management', 'Team Work', 'Graphic Design'] as const;
