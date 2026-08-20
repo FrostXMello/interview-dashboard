@@ -25,21 +25,36 @@ const normalizeAnswerSpacing = (text?: string) => {
 
 const parseTimingStartMinutes = (timing: string) => {
   const normalized = (timing || '').replace(/[–—]/g, '-').trim();
-  const firstChunk = normalized.split('-')[0]?.trim();
-  if (!firstChunk || firstChunk.toUpperCase() === 'TBD') return Number.POSITIVE_INFINITY;
+  if (!normalized || normalized.toUpperCase() === 'TBD') return Number.POSITIVE_INFINITY;
 
-  const match = firstChunk.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (!match) return Number.POSITIVE_INFINITY;
+  const timeMatch = normalized.match(/(\d{1,2}):(\d{2})/);
+  const meridiemMatch = normalized.match(/\b(AM|PM)\b/i);
+  if (!timeMatch || !meridiemMatch) return Number.POSITIVE_INFINITY;
 
-  const hourRaw = Number(match[1]);
-  const minute = Number(match[2]);
-  const meridiem = match[3].toUpperCase();
+  const hourRaw = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2]);
+  const meridiem = meridiemMatch[1].toUpperCase();
 
   let hour = hourRaw % 12;
   if (meridiem === 'PM') hour += 12;
 
   return hour * 60 + minute;
 };
+
+const interviewDayRank = (day?: InterviewDay) => {
+  if (day === 'day-1') return 0;
+  if (day === 'day-2') return 1;
+  return 2;
+};
+
+function keepPreferredStudent<T extends { id: string; regNo: string; day?: InterviewDay; timing: string; panelId: number }>(current: T, incoming: T): T {
+  const dayDelta = interviewDayRank(incoming.day) - interviewDayRank(current.day);
+  if (dayDelta !== 0) return dayDelta < 0 ? incoming : current;
+  const timeDelta = parseTimingStartMinutes(incoming.timing) - parseTimingStartMinutes(current.timing);
+  if (timeDelta !== 0) return timeDelta < 0 ? incoming : current;
+  if (incoming.panelId !== current.panelId) return incoming.panelId < current.panelId ? incoming : current;
+  return incoming.id.localeCompare(current.id) < 0 ? incoming : current;
+}
 
 export default function Dashboard() {
   const router = useRouter();
@@ -162,7 +177,13 @@ export default function Dashboard() {
   }).filter((student) => {
     if (!normalizedSearch) return true;
     return student.name.toLowerCase().includes(normalizedSearch) || student.regNo.toLowerCase().includes(normalizedSearch);
-  }).sort((a, b) => {
+  }).reduce((unique, student) => {
+    const existing = unique.get(student.regNo);
+    unique.set(student.regNo, existing ? keepPreferredStudent(existing, student) : student);
+    return unique;
+  }, new Map<string, (typeof students)[number]>());
+
+  const visibleStudents = [...filteredStudents.values()].sort((a, b) => {
     const aTime = parseTimingStartMinutes(a.timing);
     const bTime = parseTimingStartMinutes(b.timing);
     if (aTime !== bTime) return aTime - bTime;
@@ -280,10 +301,21 @@ export default function Dashboard() {
   };
 
   // Calculate stats
-  const studentsWithScores = students.filter((s) => s.isActive !== false).map(s => ({
-    ...s,
-    avgScore: getOverallScore(s.id)
-  })).sort((a, b) => b.avgScore - a.avgScore);
+  const uniqueActiveStudents = [...students
+    .filter((student) => student.isActive !== false)
+    .reduce((unique, student) => {
+      const existing = unique.get(student.regNo);
+      unique.set(student.regNo, existing ? keepPreferredStudent(existing, student) : student);
+      return unique;
+    }, new Map<string, (typeof students)[number]>())
+    .values()];
+
+  const studentsWithScores = uniqueActiveStudents
+    .map((s) => ({
+      ...s,
+      avgScore: getOverallScore(s.id)
+    }))
+    .sort((a, b) => b.avgScore - a.avgScore);
 
   const overallLeaderboardRows = studentsWithScores.filter((s) => s.avgScore > 0);
 
@@ -310,8 +342,7 @@ export default function Dashboard() {
     return totalPoints / liveRatings.length;
   };
 
-  const rankingRows = students
-    .filter((student) => student.isActive !== false)
+  const rankingRows = uniqueActiveStudents
     .map((student) => {
       const avgScore = getOverallScore(student.id);
       const domainPoints = rankingTab === 'all' ? 0 : getDomainPriorityAverage(student.id, rankingTab);
@@ -365,7 +396,7 @@ export default function Dashboard() {
             </button>
           )}
           <div className="mt-2 text-xs text-gray-500">
-            Completed interviews: {filteredStudents.filter((student) => completedStudentIds.has(student.id)).length}
+            Completed interviews: {visibleStudents.filter((student) => completedStudentIds.has(student.id)).length}
           </div>
           <div className="flex mt-4 gap-1 bg-gray-800 p-1 rounded-lg">
             {([
@@ -427,7 +458,7 @@ export default function Dashboard() {
         </div>
         
         <div className="flex-1 overflow-y-auto p-2 space-y-2">
-          {filteredStudents.length > 0 ? filteredStudents.map(student => {
+          {visibleStudents.length > 0 ? visibleStudents.map(student => {
             const computedStatus = completedStudentIds.has(student.id)
               ? 'completed'
               : student.status;
