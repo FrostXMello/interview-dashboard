@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { LogOut, Star, User as UserIcon, CheckCircle, ChevronRight, BarChart3, Users, Save, Search, Loader2, Shield } from 'lucide-react';
 import clsx from 'clsx';
 import { SuperAdminControlCenter } from '@/components/super-admin/SuperAdminControlCenter';
+import { leaveSession } from '@/lib/auth/session';
 
 const normalizeAnswerSpacing = (text?: string) => {
   if (!text) return '—';
@@ -51,7 +52,6 @@ export default function Dashboard() {
     submitRating,
     setRatingSubmitted,
     setStudentStatus,
-    logout,
     getOverallScore,
     getStudentRatings,
     appMode,
@@ -488,12 +488,7 @@ export default function Dashboard() {
              <button
                type="button"
                aria-label="Log out"
-               onClick={() => {
-                 void (async () => {
-                   await logout();
-                   window.location.replace('/?loggedOut=1');
-                 })();
-               }}
+               onClick={leaveSession}
                className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-red-400 transition-colors"
              >
                <LogOut className="h-5 w-5" />

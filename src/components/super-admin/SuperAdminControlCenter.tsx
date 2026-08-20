@@ -5,6 +5,7 @@ import { useData } from '@/context/DataProvider';
 import type { Student } from '@/lib/data';
 import clsx from 'clsx';
 import { ClipboardList, LogOut } from 'lucide-react';
+import { leaveSession } from '@/lib/auth/session';
 
 type Section = 'overview' | 'candidates' | 'panelists' | 'panels' | 'leaderboard' | 'system' | 'import';
 
@@ -36,13 +37,11 @@ export function SuperAdminControlCenter() {
     updateCandidate,
     getOverallScore,
     setViewAsPanelist,
-    logout,
     lastError
   } = useData();
   const [section, setSection] = useState<Section>('overview');
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
-  const [leaving, setLeaving] = useState(false);
   const [message, setMessage] = useState('');
   const [panelIdsInputByUser, setPanelIdsInputByUser] = useState<Record<string, string>>({});
 
@@ -122,11 +121,8 @@ export function SuperAdminControlCenter() {
     );
   };
 
-  const handleLogout = async () => {
-    if (leaving) return;
-    setLeaving(true);
-    await logout();
-    window.location.replace('/?loggedOut=1');
+  const handleLogout = () => {
+    leaveSession();
   };
 
   return (
@@ -150,12 +146,11 @@ export function SuperAdminControlCenter() {
           <button
             type="button"
             aria-label="Log out"
-            disabled={leaving}
-            onClick={() => { void handleLogout(); }}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-red-300 disabled:opacity-60"
+            onClick={handleLogout}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-red-300"
           >
             <LogOut className="h-4 w-4" />
-            {leaving ? 'Logging out…' : 'Log out'}
+            Log out
           </button>
         </div>
       </header>
@@ -480,12 +475,11 @@ export function SuperAdminControlCenter() {
           <button
             type="button"
             aria-label="Log out"
-            disabled={leaving}
-            onClick={() => { void handleLogout(); }}
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-red-800 bg-red-950/40 px-3 text-sm font-semibold text-red-200 disabled:opacity-60"
+            onClick={handleLogout}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-red-800 bg-red-950/40 px-3 text-sm font-semibold text-red-200"
           >
             <LogOut className="h-4 w-4" />
-            {leaving ? 'Logging out…' : 'Log out'}
+            Log out
           </button>
         </div>
       </div>

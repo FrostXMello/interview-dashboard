@@ -257,20 +257,15 @@ export class RemoteSupabaseRepository implements InterviewRepository {
 
   async signOut(): Promise<OperationResult<null>> {
     try {
-      const sb = this.client();
-      const global = await sb.auth.signOut({ scope: 'global' });
-      if (global.error) {
-        const local = await sb.auth.signOut({ scope: 'local' });
-        if (local.error) return failure(toAppError(local.error, 'AUTHENTICATION_FAILURE'));
-      }
+      await Promise.race([
+        this.client().auth.signOut({ scope: 'local' }),
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 300);
+        })
+      ]);
       return success(null);
-    } catch (err) {
-      try {
-        await this.client().auth.signOut({ scope: 'local' });
-        return success(null);
-      } catch {
-        return failure(toAppError(err));
-      }
+    } catch {
+      return success(null);
     }
   }
 

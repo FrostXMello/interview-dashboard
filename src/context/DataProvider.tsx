@@ -390,18 +390,22 @@ export const DataProvider = ({ children }: { children: React.ReactNode }) => {
 
   const logout = useCallback(async () => {
     sessionEpochRef.current += 1;
-    try {
-      const result = await repository.signOut();
-      if (!result.ok) reportError(result.error);
-    } catch (err) {
-      reportError(err instanceof AppError ? err : new AppError('NETWORK_FAILURE', 'Sign-out failed'));
-    }
     setCurrentUser(null);
     setStudents([]);
     setRatings([]);
     setViewAsPanelist(false);
     setSyncStatus(appMode === 'offline-demo' ? 'offline' : 'ready');
-  }, [appMode, reportError, repository, setViewAsPanelist]);
+    try {
+      await Promise.race([
+        repository.signOut(),
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 400);
+        })
+      ]);
+    } catch {
+      // Local navigation to /logout still expires cookies.
+    }
+  }, [appMode, repository, setViewAsPanelist]);
 
   const addStudent = useCallback((student: Student) => {
     void student;

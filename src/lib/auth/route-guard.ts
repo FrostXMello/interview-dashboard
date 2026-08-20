@@ -29,5 +29,5 @@ export function isDashboardPath(pathname: string): boolean {
 
 /** Login and other unauthenticated pages — skip Auth network probes here. */
 export function isPublicPath(pathname: string): boolean {
-  return pathname === '/' || pathname === '';
+  return pathname === '/' || pathname === '' || pathname === '/logout';
 }

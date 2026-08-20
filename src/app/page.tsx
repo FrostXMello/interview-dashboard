@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useData } from '@/context/DataProvider';
 import { LoginForm } from '@/components/auth/LoginForm';
 import { RegisterFlow } from '@/components/auth/RegisterFlow';
@@ -13,12 +13,16 @@ function goToDashboard() {
   window.location.replace('/dashboard');
 }
 
+function hasLoggedOutFlag() {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('loggedOut') === '1';
+}
+
 export default function LoginPage() {
   const {
     appMode,
     currentUser,
     loginWithPassword,
-    logout,
     lastError,
     clearError
   } = useData();
@@ -27,7 +31,6 @@ export default function LoginPage() {
   const [attemptedLogin, setAttemptedLogin] = useState(false);
   const [opening, setOpening] = useState(false);
   const [stayOnLogin, setStayOnLogin] = useState(false);
-  const forcedLogoutRef = useRef(false);
   const isDemoMode = appMode === 'offline-demo';
 
   const errorText = useMemo(
@@ -36,15 +39,11 @@ export default function LoginPage() {
   );
 
   useEffect(() => {
-    if (forcedLogoutRef.current) return;
-    if (new URLSearchParams(window.location.search).get('loggedOut') !== '1') return;
-    forcedLogoutRef.current = true;
-    setStayOnLogin(true);
-    void logout();
-  }, [logout]);
+    if (hasLoggedOutFlag()) setStayOnLogin(true);
+  }, []);
 
   useEffect(() => {
-    if (!currentUser || opening || stayOnLogin) return;
+    if (!currentUser || opening || stayOnLogin || hasLoggedOutFlag()) return;
     setOpening(true);
     goToDashboard();
   }, [currentUser, opening, stayOnLogin]);
@@ -61,7 +60,7 @@ export default function LoginPage() {
     return ok;
   };
 
-  if ((currentUser || opening) && !stayOnLogin) {
+  if ((currentUser || opening) && !stayOnLogin && !hasLoggedOutFlag()) {
     return <SessionLoading label="Opening dashboard…" />;
   }
 

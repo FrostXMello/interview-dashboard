@@ -34,6 +34,7 @@ describe('connected-mode middleware decisions', () => {
 
   it('marks login as a public path', () => {
     expect(isPublicPath('/')).toBe(true);
+    expect(isPublicPath('/logout')).toBe(true);
     expect(isPublicPath('/dashboard')).toBe(false);
   });
 });
