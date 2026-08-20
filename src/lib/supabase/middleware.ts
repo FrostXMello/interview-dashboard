@@ -1,6 +1,6 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-import { resolveProtectedRoute } from '@/lib/auth/route-guard';
+import { resolveProtectedRoute, isPublicPath } from '@/lib/auth/route-guard';
 import { getAppMode, isSupabaseConfigured } from '@/lib/mode';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
@@ -11,7 +11,7 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
-  if (!isSupabaseConfigured()) {
+  if (!isSupabaseConfigured() || isPublicPath(request.nextUrl.pathname)) {
     return supabaseResponse;
   }
 
@@ -47,7 +47,7 @@ export async function updateSession(request: NextRequest) {
     const result = await Promise.race([
       supabase.auth.getUser(),
       new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('auth-probe-timeout')), 350);
+        setTimeout(() => reject(new Error('auth-probe-timeout')), 1200);
       })
     ]);
     user = result.data.user;

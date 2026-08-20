@@ -2,7 +2,7 @@ import { canManageCandidateStatus, isAppRole, type AppRole } from '@/lib/auth/ro
 import { canWriteRatingAs, validateRatingPayload } from '@/lib/auth/authorization';
 import { normalizePhoneE164 } from '@/lib/auth/phone';
 import { mapInterviewDay, type InterviewDay, type Rating, type Student, type User } from '@/lib/data';
-import { AppError, failure, success, toAppError, type OperationResult } from '@/lib/errors';
+import { AppError, failure, isMissingAuthSession, success, toAppError, type OperationResult } from '@/lib/errors';
 import type { InterviewRepository, SessionSnapshot } from '@/lib/data-access/types';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -147,6 +147,59 @@ function toRatingRow(rating: Rating): RatingRow {
   };
 }
 
+type PasswordCredentials = { phone: string; password: string } | { email: string; password: string };
+type PasswordSignInResult = {
+  data: { user: { id: string } | null };
+  error: { message?: string } | null;
+};
+
+function firstSuccessfulPasswordSignIn(
+  signIn: (credentials: PasswordCredentials) => Promise<PasswordSignInResult>,
+  attempts: PasswordCredentials[]
+): Promise<PasswordSignInResult> {
+  if (attempts.length === 0) {
+    return Promise.resolve({ data: { user: null }, error: { message: 'Sign-in failed' } });
+  }
+
+  return new Promise((resolve) => {
+    let remaining = attempts.length;
+    let lastError: PasswordSignInResult['error'] = { message: 'Sign-in failed' };
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({ data: { user: null }, error: { message: 'Sign-in timed out. Please try again.' } });
+    }, 8000);
+
+    const finish = (result: PasswordSignInResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+
+    for (const credentials of attempts) {
+      void signIn(credentials)
+        .then((result) => {
+          if (settled) return;
+          if (result.data?.user && !result.error) {
+            finish(result);
+            return;
+          }
+          lastError = result.error || lastError;
+          remaining -= 1;
+          if (remaining === 0) finish({ data: { user: null }, error: lastError });
+        })
+        .catch((err: unknown) => {
+          if (settled) return;
+          lastError = { message: err instanceof Error ? err.message : 'Sign-in failed' };
+          remaining -= 1;
+          if (remaining === 0) finish({ data: { user: null }, error: lastError });
+        });
+    }
+  });
+}
+
 /**
  * Connected-mode repository using Supabase Auth + PostgREST.
  * Relies on RLS for authorization; does not seed passwords or trust client role claims.
@@ -188,17 +241,20 @@ export class RemoteSupabaseRepository implements InterviewRepository {
   async getSession(): Promise<OperationResult<SessionSnapshot>> {
     try {
       const sb = this.client();
-      const { data: authData, error: authError } = await sb.auth.getUser();
-      if (authError) return failure(toAppError(authError, 'AUTHENTICATION_FAILURE'));
-      if (!authData.user) {
-        return success({ mode: this.mode, user: null, isDemoSession: false });
-      }
+      const loggedOut = success<SessionSnapshot>({ mode: this.mode, user: null, isDemoSession: false });
+      const { data: sessionData, error: sessionError } = await sb.auth.getSession();
+      if (sessionError && isMissingAuthSession(sessionError)) return loggedOut;
+      const userId = sessionData.session?.user?.id;
+      if (!userId) return loggedOut;
 
-      const profileResult = await this.loadUser(authData.user.id);
+      const profileResult = await this.loadUser(userId);
       if (!profileResult.ok) return failure(profileResult.error);
 
       return success({ mode: this.mode, user: profileResult.data, isDemoSession: false });
     } catch (err) {
+      if (isMissingAuthSession(err)) {
+        return success({ mode: this.mode, user: null, isDemoSession: false });
+      }
       return failure(toAppError(err));
     }
   }
@@ -212,23 +268,15 @@ export class RemoteSupabaseRepository implements InterviewRepository {
         ? { phone, password }
         : { email: trimmed, password };
 
-      let { data, error } = await sb.auth.signInWithPassword(credentials);
-      const phoneProviderUnavailable =
-        Boolean(error) &&
-        /phone.*(disabled|not enabled|unavailable)|phone logins are disabled/i.test(error?.message || '');
-      if (error && phone && !trimmed.includes('@') && phoneProviderUnavailable) {
+      const attempts: Array<{ phone: string; password: string } | { email: string; password: string }> = [credentials];
+      if (phone && !trimmed.includes('@')) {
         const digits = phone.replace(/\D/g, '').slice(-10);
         if (digits.length === 10) {
-          const retry = await sb.auth.signInWithPassword({
-            email: `${digits}@interviews.local`,
-            password
-          });
-          if (!retry.error && retry.data.user) {
-            data = retry.data;
-            error = retry.error;
-          }
+          attempts.push({ email: `${digits}@interviews.local`, password });
         }
       }
+
+      const { data, error } = await firstSuccessfulPasswordSignIn((next) => sb.auth.signInWithPassword(next), attempts);
       if (error || !data.user) {
         return failure(
           new AppError('AUTHENTICATION_FAILURE', error?.message || 'Sign-in failed', {
@@ -263,13 +311,13 @@ export class RemoteSupabaseRepository implements InterviewRepository {
 
   private async loadUser(userId: string): Promise<OperationResult<User>> {
     const sb = this.client();
-    const { data: profile, error: profileError } = await sb
-      .from('profiles')
-      .select('id, display_name, role, display_title, is_active')
-      .eq('id', userId)
-      .maybeSingle();
+    const [profileResult, membershipResult] = await Promise.all([
+      sb.from('profiles').select('id, display_name, role, display_title, is_active').eq('id', userId).maybeSingle(),
+      sb.from('panel_memberships').select('profile_id, panel_id').eq('profile_id', userId)
+    ]);
 
-    if (profileError) return failure(toAppError(profileError, 'DATABASE_FAILURE'));
+    if (profileResult.error) return failure(toAppError(profileResult.error, 'DATABASE_FAILURE'));
+    const profile = profileResult.data;
     if (!profile) {
       return failure(
         new AppError('AUTHORIZATION_FAILURE', 'No application profile for authenticated user', {
@@ -290,14 +338,8 @@ export class RemoteSupabaseRepository implements InterviewRepository {
       return success(mapUser(mappedProfile, []));
     }
 
-    const { data: memberships, error: membershipError } = await sb
-      .from('panel_memberships')
-      .select('profile_id, panel_id')
-      .eq('profile_id', userId);
-
-    if (membershipError) return failure(toAppError(membershipError, 'DATABASE_FAILURE'));
-
-    const panelIds = ((memberships || []) as MembershipRow[]).map((m) => m.panel_id);
+    if (membershipResult.error) return failure(toAppError(membershipResult.error, 'DATABASE_FAILURE'));
+    const panelIds = ((membershipResult.data || []) as MembershipRow[]).map((m) => m.panel_id);
     return success(mapUser(mappedProfile, panelIds));
   }
 

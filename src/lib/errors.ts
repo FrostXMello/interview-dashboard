@@ -61,6 +61,19 @@ export function failure<T = never>(error: AppError): OperationResult<T> {
   return { ok: false, error, code: error.code };
 }
 
+/** True when Auth has no current user — this is not a failed login attempt. */
+export function isMissingAuthSession(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const name = 'name' in err ? String((err as { name?: unknown }).name || '') : '';
+  const code = 'code' in err ? String((err as { code?: unknown }).code || '') : '';
+  const message = 'message' in err ? String((err as { message?: unknown }).message || '') : '';
+  return (
+    name === 'AuthSessionMissingError' ||
+    code === 'AuthSessionMissingError' ||
+    /auth session missing/i.test(message)
+  );
+}
+
 export function toAppError(err: unknown, fallback: AppErrorCode = 'UNKNOWN'): AppError {
   if (err instanceof AppError) return err;
 
@@ -69,7 +82,13 @@ export function toAppError(err: unknown, fallback: AppErrorCode = 'UNKNOWN'): Ap
     const status = 'status' in err ? Number((err as { status?: unknown }).status) : undefined;
     const code = 'code' in err ? String((err as { code?: unknown }).code) : '';
 
-    if (status === 401 || code === 'PGRST301' || /jwt|auth/i.test(message)) {
+    if (isMissingAuthSession(err)) {
+      return new AppError('AUTHENTICATION_FAILURE', message, {
+        cause: err,
+        userMessage: 'Sign in to continue.'
+      });
+    }
+    if (status === 401 || code === 'PGRST301' || /invalid (jwt|token)|jwt expired|invalid login credentials/i.test(message)) {
       return new AppError('AUTHENTICATION_FAILURE', message, { cause: err });
     }
     if (status === 403 || code === '42501' || /permission|policy|rls/i.test(message)) {

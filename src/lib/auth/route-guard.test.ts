@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveProtectedRoute } from '@/lib/auth/route-guard';
+import { resolveProtectedRoute, isPublicPath } from '@/lib/auth/route-guard';
 
 describe('connected-mode middleware decisions', () => {
   it('redirects unauthenticated /dashboard to login', () => {
@@ -30,6 +30,11 @@ describe('connected-mode middleware decisions', () => {
         hasAuthenticatedUser: false
       })
     ).toEqual({ action: 'next' });
+  });
+
+  it('marks login as a public path', () => {
+    expect(isPublicPath('/')).toBe(true);
+    expect(isPublicPath('/dashboard')).toBe(false);
   });
 });
 

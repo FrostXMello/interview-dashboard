@@ -166,6 +166,7 @@ export const DataProvider = ({ children }: { children: React.ReactNode }) => {
   const [viewAsPanelist, setViewAsPanelistState] = useState(false);
   const pendingByKeyRef = useRef(new Map<string, Rating>());
   const inFlightKeysRef = useRef(new Set<string>());
+  const sessionEpochRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -235,11 +236,16 @@ export const DataProvider = ({ children }: { children: React.ReactNode }) => {
   );
 
   const refreshFromServer = useCallback(async () => {
+    const epoch = sessionEpochRef.current;
     setSyncStatus('loading');
     const sessionResult = await repository.getSession();
+    if (epoch !== sessionEpochRef.current) return;
+
     if (!sessionResult.ok) {
-      reportError(sessionResult.error);
       setCurrentUser(null);
+      setStudents([]);
+      setRatings([]);
+      setSyncStatus(appMode === 'offline-demo' ? 'offline' : 'ready');
       return;
     }
 
@@ -254,7 +260,7 @@ export const DataProvider = ({ children }: { children: React.ReactNode }) => {
     }
 
     await loadWorkspace(sessionResult.data.user);
-  }, [appMode, loadWorkspace, reportError, repository]);
+  }, [appMode, loadWorkspace, repository]);
 
   const currentUserRef = useRef(currentUser);
   currentUserRef.current = currentUser;
@@ -323,19 +329,23 @@ export const DataProvider = ({ children }: { children: React.ReactNode }) => {
 
   const loginWithPassword = useCallback(
     async (email: string, password: string) => {
+      sessionEpochRef.current += 1;
+      const epoch = sessionEpochRef.current;
       clearError();
-      setSyncStatus('loading');
       const result = await repository.signInWithPassword(email, password);
+      if (epoch !== sessionEpochRef.current) return false;
       if (!result.ok) {
         reportError(result.error);
+        setSyncStatus(appMode === 'offline-demo' ? 'offline' : 'ready');
         return false;
       }
       setIsDemoSession(false);
       setCurrentUser(result.data);
+      setSyncStatus(appMode === 'offline-demo' ? 'offline' : 'ready');
       void loadWorkspace(result.data);
       return true;
     },
-    [clearError, loadWorkspace, reportError, repository]
+    [appMode, clearError, loadWorkspace, reportError, repository]
   );
 
   const enterDemoPersona = useCallback(

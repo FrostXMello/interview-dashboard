@@ -17,14 +17,17 @@ export default function LoginPage() {
     currentUser,
     loginWithPassword,
     lastError,
-    clearError,
-    syncStatus
+    clearError
   } = useData();
 
   const [view, setView] = useState<AuthView>('login');
+  const [attemptedLogin, setAttemptedLogin] = useState(false);
   const isDemoMode = appMode === 'offline-demo';
 
-  const errorText = useMemo(() => lastError?.message || '', [lastError]);
+  const errorText = useMemo(
+    () => (attemptedLogin ? lastError?.message || '' : ''),
+    [attemptedLogin, lastError]
+  );
 
   useEffect(() => {
     router.prefetch('/dashboard');
@@ -35,15 +38,12 @@ export default function LoginPage() {
   }, [currentUser, router]);
 
   const handleLogin = async (phone: string, password: string) => {
+    setAttemptedLogin(true);
     clearError();
     const ok = await loginWithPassword(phone, password);
     if (ok) router.replace('/dashboard');
     return ok;
   };
-
-  if (!currentUser && syncStatus === 'loading' && !lastError) {
-    return <SessionLoading label="Checking session…" />;
-  }
 
   if (currentUser) {
     return <SessionLoading label="Opening dashboard…" />;

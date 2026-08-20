@@ -16,10 +16,18 @@ export function resolveProtectedRoute(args: {
     return { action: 'next' };
   }
 
-  const isDashboard = args.pathname === '/dashboard' || args.pathname.startsWith('/dashboard/');
-  if (isDashboard && !args.hasAuthenticatedUser) {
+  if (isDashboardPath(args.pathname) && !args.hasAuthenticatedUser) {
     return { action: 'redirect-login', redirectTo: '/' };
   }
 
   return { action: 'next' };
+}
+
+export function isDashboardPath(pathname: string): boolean {
+  return pathname === '/dashboard' || pathname.startsWith('/dashboard/');
+}
+
+/** Login and other unauthenticated pages — skip Auth network probes here. */
+export function isPublicPath(pathname: string): boolean {
+  return pathname === '/' || pathname === '';
 }
