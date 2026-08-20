@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { useData } from '@/context/DataProvider';
 import type { Student } from '@/lib/data';
 import clsx from 'clsx';
@@ -24,7 +23,6 @@ function countBy<T>(items: T[], predicate: (value: T) => boolean) {
 }
 
 export function SuperAdminControlCenter() {
-  const router = useRouter();
   const {
     currentUser,
     users,
@@ -124,28 +122,28 @@ export function SuperAdminControlCenter() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-4 md:p-6 lg:p-8 space-y-6">
+    <div className="min-h-dvh bg-gray-950 text-gray-100 p-3 sm:p-4 md:p-6 lg:p-8 space-y-4 sm:space-y-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       <header className="rounded-xl border border-gray-800 bg-gray-900/50 p-4 md:p-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold">Super Admin Control Center</h1>
-          <p className="mt-2 text-sm text-gray-400">Manage users, candidates, and system configuration from one dashboard.</p>
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">Super Admin Control Center</h1>
+          <p className="mt-2 text-sm text-gray-400">Manage users, candidates, and live interview data.</p>
           {message ? <p className="mt-3 text-sm text-blue-300">{message}</p> : null}
           {lastError ? <p className="mt-3 text-sm text-red-300">{lastError.message}</p> : null}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
           <button
             type="button"
             onClick={() => setViewAsPanelist(true)}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500"
           >
             <ClipboardList className="h-4 w-4" />
-            Interview as panelist
+            Interview
           </button>
           <button
             type="button"
             aria-label="Log out"
-            onClick={() => { logout(); router.push('/'); }}
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-red-300"
+            onClick={() => { logout(); window.location.replace('/'); }}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-red-300"
           >
             <LogOut className="h-4 w-4" />
             Log out
@@ -153,20 +151,22 @@ export function SuperAdminControlCenter() {
         </div>
       </header>
 
-      <nav className="rounded-xl border border-gray-800 bg-gray-900/50 p-2 flex flex-wrap gap-2">
+      <nav className="rounded-xl border border-gray-800 bg-gray-900/50 p-2 -mx-3 px-3 sm:mx-0 sm:px-2 overflow-x-auto">
+        <div className="flex min-w-max gap-2">
         {sections.map((item) => (
           <button
             key={item.id}
             type="button"
             onClick={() => setSection(item.id)}
             className={clsx(
-              'rounded-lg px-3 py-2 text-sm transition-colors',
+              'min-h-10 whitespace-nowrap rounded-lg px-3 py-2 text-sm transition-colors',
               section === item.id ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
             )}
           >
             {item.label}
           </button>
         ))}
+        </div>
       </nav>
 
       {(section === 'panelists' || section === 'candidates') ? (
@@ -175,7 +175,7 @@ export function SuperAdminControlCenter() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={section === 'panelists' ? 'Search panelists...' : 'Search candidates...'}
-            className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full min-h-11 rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-base outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
       ) : null}
@@ -204,18 +204,58 @@ export function SuperAdminControlCenter() {
 
       {section === 'panelists' && (
         <section className="rounded-xl border border-gray-800 bg-gray-900/50 p-4 md:p-6">
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-xl font-semibold">People</h2>
             <button
               type="button"
               disabled={busy}
               onClick={handleAddPanelist}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
+              className="min-h-11 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
             >
               Add Panelist
             </button>
           </div>
-          <div className="overflow-x-auto">
+          <div className="space-y-3 md:hidden">
+            {filteredPanelists.map((user) => (
+              <div key={user.id} className="rounded-xl border border-gray-800 bg-gray-950/50 p-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="font-semibold">{user.name}</div>
+                    <div className="text-xs text-gray-400">{user.role} · {user.displayTitle || '—'}</div>
+                    <div className="text-xs text-gray-500">Panels {(user.panelIds || []).join(', ') || '—'} · {user.isActive === false ? 'inactive' : 'active'}</div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" disabled={busy} className="min-h-10 rounded border border-gray-700 px-3 text-xs" onClick={() => {
+                    const displayName = window.prompt('Display name', user.name);
+                    if (!displayName) return;
+                    const displayTitle = window.prompt('Title', user.displayTitle || '') ?? user.displayTitle;
+                    const roleRaw = window.prompt('Role (panelist, senior_panelist, admin, super_admin)', user.role) || user.role;
+                    const role = roleRaw === 'senior_panelist' || roleRaw === 'admin' || roleRaw === 'super_admin' || roleRaw === 'panelist' ? roleRaw : user.role;
+                    void run(() => updateUser(user.id, { displayName, displayTitle: displayTitle || undefined, role }), 'Person updated.');
+                  }}>Edit</button>
+                  <button type="button" disabled={busy} className="min-h-10 rounded border border-gray-700 px-3 text-xs" onClick={() => {
+                    const phone = window.prompt('Phone number', user.phone || '');
+                    if (!phone) return;
+                    void run(() => updateUser(user.id, { phone }), 'Phone updated.');
+                  }}>Phone</button>
+                  <input
+                    value={panelIdsInputByUser[user.id] ?? (user.panelIds || []).join(',')}
+                    onChange={(e) => setPanelIdsInputByUser((prev) => ({ ...prev, [user.id]: e.target.value }))}
+                    className="min-h-10 w-24 rounded border border-gray-700 bg-gray-950 px-2 text-xs"
+                  />
+                  <button type="button" disabled={busy} className="min-h-10 rounded border border-gray-700 px-3 text-xs" onClick={() => {
+                    const panelIds = (panelIdsInputByUser[user.id] ?? '').split(',').map((v) => Number(v.trim())).filter((v) => v === 1 || v === 2);
+                    void run(() => updatePanelMemberships(user.id, panelIds), 'Panel memberships updated.');
+                  }}>Panels</button>
+                  <button type="button" disabled={busy} className="min-h-10 rounded border border-red-800 px-3 text-xs text-red-300" onClick={() => {
+                    void run(() => updateUser(user.id, { isActive: user.isActive === false }), user.isActive === false ? 'Panelist reactivated.' : 'Panelist deactivated.');
+                  }}>{user.isActive === false ? 'Reactivate' : 'Deactivate'}</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full min-w-[900px] text-sm">
               <thead className="text-gray-400">
                 <tr>
@@ -311,18 +351,30 @@ export function SuperAdminControlCenter() {
 
       {section === 'candidates' && (
         <section className="rounded-xl border border-gray-800 bg-gray-900/50 p-4 md:p-6">
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-xl font-semibold">Candidate Management</h2>
             <button
               type="button"
               disabled={busy}
               onClick={handleAddCandidate}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
+              className="min-h-11 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
             >
               Add Candidate
             </button>
           </div>
-          <div className="overflow-x-auto">
+          <div className="space-y-3 md:hidden">
+            {filteredCandidates.map((candidate) => (
+              <div key={candidate.id} className="rounded-xl border border-gray-800 bg-gray-950/50 p-3 space-y-2">
+                <div className="font-semibold">{candidate.name}</div>
+                <div className="text-xs text-gray-400">{candidate.regNo} · {candidate.day} · Panel {candidate.panelId} · {candidate.timing}</div>
+                <div className="text-xs text-gray-500">{candidate.isActive === false ? 'inactive' : candidate.status}</div>
+                <CandidateActions candidate={candidate} busy={busy} onSave={async (updates) => {
+                  await run(() => updateCandidate(candidate.id, updates), 'Candidate updated.');
+                }} />
+              </div>
+            ))}
+          </div>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full min-w-[980px] text-sm">
               <thead className="text-gray-400">
                 <tr>
@@ -447,113 +499,137 @@ function CandidateRow({
       <td className="py-2">{candidate.timing}</td>
       <td className="py-2">{candidate.isActive === false ? 'inactive' : candidate.status}</td>
       <td className="py-2">
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={busy}
-            className="rounded border border-gray-700 px-2 py-1 text-xs hover:bg-gray-800"
-            onClick={() => {
-              const name = window.prompt('Name', candidate.name);
-              if (!name) return;
-              const regNo = window.prompt('Registration number', candidate.regNo);
-              if (!regNo) return;
-              const timing = window.prompt('Timing', candidate.timing);
-              if (timing == null) return;
-              void onSave({ name, regNo, timing });
-            }}
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            className="rounded border border-gray-700 px-2 py-1 text-xs hover:bg-gray-800"
-            onClick={() => {
-              const email = window.prompt('Email', candidate.form?.email || '');
-              if (email == null) return;
-              const phone = window.prompt('Phone', candidate.form?.phone || '');
-              if (phone == null) return;
-              const program = window.prompt('Program', candidate.form?.program || '');
-              if (program == null) return;
-              void onSave({
-                form: {
-                  ...(candidate.form || {}),
-                  email,
-                  phone,
-                  program
-                }
-              });
-            }}
-          >
-            Contact
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            className="rounded border border-gray-700 px-2 py-1 text-xs hover:bg-gray-800"
-            onClick={() => {
-              const domains = window.prompt('Preferred domains', candidate.form?.domains || '');
-              if (domains == null) return;
-              const whyInterested = window.prompt('Why interested', candidate.form?.whyInterested || '');
-              if (whyInterested == null) return;
-              void onSave({
-                form: {
-                  ...(candidate.form || {}),
-                  domains,
-                  whyInterested
-                }
-              });
-            }}
-          >
-            Application
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            className="rounded border border-gray-700 px-2 py-1 text-xs hover:bg-gray-800"
-            onClick={() => {
-              const nextPanel = candidate.panelId === 1 ? 2 : 1;
-              void onSave({ panelId: nextPanel });
-            }}
-          >
-            Change Panel
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            className="rounded border border-gray-700 px-2 py-1 text-xs hover:bg-gray-800"
-            onClick={() => {
-              const nextDay: Student['day'] =
-                candidate.day === 'day-1' ? 'day-2' : candidate.day === 'day-2' ? 'unscheduled' : 'day-1';
-              void onSave({ day: nextDay });
-            }}
-          >
-            Change Day
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            className="rounded border border-gray-700 px-2 py-1 text-xs hover:bg-gray-800"
-            onClick={() => {
-              const nextStatus: Student['status'] =
-                candidate.status === 'pending' ? 'interviewing' : candidate.status === 'interviewing' ? 'completed' : 'pending';
-              void onSave({ status: nextStatus });
-            }}
-          >
-            Change Status
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            className="rounded border border-red-800 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40"
-            onClick={() => {
-              void onSave({ isActive: candidate.isActive === false });
-            }}
-          >
-            {candidate.isActive === false ? 'Reactivate' : 'Deactivate'}
-          </button>
-        </div>
+        <CandidateActions candidate={candidate} busy={busy} onSave={onSave} />
       </td>
     </tr>
+  );
+}
+
+function CandidateActions({
+  candidate,
+  busy,
+  onSave
+}: {
+  candidate: Student;
+  busy: boolean;
+  onSave: (updates: {
+    panelId?: number;
+    day?: Student['day'];
+    timing?: string;
+    status?: Student['status'];
+    isActive?: boolean;
+    name?: string;
+    regNo?: string;
+    form?: Student['form'];
+  }) => Promise<void>;
+}) {
+  const btn = 'min-h-10 rounded border border-gray-700 px-3 text-xs hover:bg-gray-800';
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button
+        type="button"
+        disabled={busy}
+        className={btn}
+        onClick={() => {
+          const name = window.prompt('Name', candidate.name);
+          if (!name) return;
+          const regNo = window.prompt('Registration number', candidate.regNo);
+          if (!regNo) return;
+          const timing = window.prompt('Timing', candidate.timing);
+          if (timing == null) return;
+          void onSave({ name, regNo, timing });
+        }}
+      >
+        Edit
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        className={btn}
+        onClick={() => {
+          const email = window.prompt('Email', candidate.form?.email || '');
+          if (email == null) return;
+          const phone = window.prompt('Phone', candidate.form?.phone || '');
+          if (phone == null) return;
+          const program = window.prompt('Program', candidate.form?.program || '');
+          if (program == null) return;
+          void onSave({
+            form: {
+              ...(candidate.form || {}),
+              email,
+              phone,
+              program
+            }
+          });
+        }}
+      >
+        Contact
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        className={btn}
+        onClick={() => {
+          const domains = window.prompt('Preferred domains', candidate.form?.domains || '');
+          if (domains == null) return;
+          const whyInterested = window.prompt('Why interested', candidate.form?.whyInterested || '');
+          if (whyInterested == null) return;
+          void onSave({
+            form: {
+              ...(candidate.form || {}),
+              domains,
+              whyInterested
+            }
+          });
+        }}
+      >
+        Application
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        className={btn}
+        onClick={() => {
+          const nextPanel = candidate.panelId === 1 ? 2 : 1;
+          void onSave({ panelId: nextPanel });
+        }}
+      >
+        Change Panel
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        className={btn}
+        onClick={() => {
+          const nextDay: Student['day'] =
+            candidate.day === 'day-1' ? 'day-2' : candidate.day === 'day-2' ? 'unscheduled' : 'day-1';
+          void onSave({ day: nextDay });
+        }}
+      >
+        Change Day
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        className={btn}
+        onClick={() => {
+          const nextStatus: Student['status'] =
+            candidate.status === 'pending' ? 'interviewing' : candidate.status === 'interviewing' ? 'completed' : 'pending';
+          void onSave({ status: nextStatus });
+        }}
+      >
+        Change Status
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        className="min-h-10 rounded border border-red-800 px-3 text-xs text-red-300 hover:bg-red-950/40"
+        onClick={() => {
+          void onSave({ isActive: candidate.isActive === false });
+        }}
+      >
+        {candidate.isActive === false ? 'Reactivate' : 'Deactivate'}
+      </button>
+    </div>
   );
 }

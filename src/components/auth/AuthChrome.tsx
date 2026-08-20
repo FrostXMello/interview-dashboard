@@ -12,9 +12,9 @@ export function AuthCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="w-full max-w-md space-y-6 bg-gray-900 p-8 rounded-xl border border-gray-800 shadow-2xl">
+    <div className="w-full max-w-md space-y-5 sm:space-y-6 bg-gray-900 p-5 sm:p-8 rounded-2xl border border-gray-800 shadow-2xl">
       <div className="text-center">
-        <h1 className="text-3xl font-bold tracking-tight text-white">{title}</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">{title}</h1>
         {subtitle ? <p className="mt-2 text-sm text-gray-400">{subtitle}</p> : null}
       </div>
       {children}
@@ -37,7 +37,7 @@ export function PrimaryButton({
     <button
       type={type}
       disabled={disabled || loading}
-      className="flex w-full justify-center rounded-lg bg-blue-600 py-2.5 px-4 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-70 disabled:cursor-not-allowed transition-all"
+      className="flex min-h-11 w-full justify-center rounded-lg bg-blue-600 py-3 px-4 text-base font-semibold text-white hover:bg-blue-500 disabled:opacity-70 disabled:cursor-not-allowed transition-all"
     >
       {loading ? <Loader2 className="animate-spin h-5 w-5" /> : children}
     </button>

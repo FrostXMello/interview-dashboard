@@ -147,59 +147,6 @@ function toRatingRow(rating: Rating): RatingRow {
   };
 }
 
-type PasswordCredentials = { phone: string; password: string } | { email: string; password: string };
-type PasswordSignInResult = {
-  data: { user: { id: string } | null };
-  error: { message?: string } | null;
-};
-
-function firstSuccessfulPasswordSignIn(
-  signIn: (credentials: PasswordCredentials) => Promise<PasswordSignInResult>,
-  attempts: PasswordCredentials[]
-): Promise<PasswordSignInResult> {
-  if (attempts.length === 0) {
-    return Promise.resolve({ data: { user: null }, error: { message: 'Sign-in failed' } });
-  }
-
-  return new Promise((resolve) => {
-    let remaining = attempts.length;
-    let lastError: PasswordSignInResult['error'] = { message: 'Sign-in failed' };
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      resolve({ data: { user: null }, error: { message: 'Sign-in timed out. Please try again.' } });
-    }, 8000);
-
-    const finish = (result: PasswordSignInResult) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(result);
-    };
-
-    for (const credentials of attempts) {
-      void signIn(credentials)
-        .then((result) => {
-          if (settled) return;
-          if (result.data?.user && !result.error) {
-            finish(result);
-            return;
-          }
-          lastError = result.error || lastError;
-          remaining -= 1;
-          if (remaining === 0) finish({ data: { user: null }, error: lastError });
-        })
-        .catch((err: unknown) => {
-          if (settled) return;
-          lastError = { message: err instanceof Error ? err.message : 'Sign-in failed' };
-          remaining -= 1;
-          if (remaining === 0) finish({ data: { user: null }, error: lastError });
-        });
-    }
-  });
-}
-
 /**
  * Connected-mode repository using Supabase Auth + PostgREST.
  * Relies on RLS for authorization; does not seed passwords or trust client role claims.
@@ -264,28 +211,31 @@ export class RemoteSupabaseRepository implements InterviewRepository {
       const sb = this.client();
       const trimmed = identifier.trim();
       const phone = normalizePhoneE164(trimmed);
-      const credentials = phone && !trimmed.includes('@')
-        ? { phone, password }
-        : { email: trimmed, password };
+      const digits = phone ? phone.replace(/\D/g, '').slice(-10) : '';
+      const attempts: Array<{ phone: string; password: string } | { email: string; password: string }> = [];
 
-      const attempts: Array<{ phone: string; password: string } | { email: string; password: string }> = [credentials];
-      if (phone && !trimmed.includes('@')) {
-        const digits = phone.replace(/\D/g, '').slice(-10);
-        if (digits.length === 10) {
-          attempts.push({ email: `${digits}@interviews.local`, password });
+      if (phone && !trimmed.includes('@') && digits.length === 10) {
+        attempts.push({ email: `${digits}@interviews.local`, password });
+        attempts.push({ phone, password });
+      } else {
+        attempts.push(phone && !trimmed.includes('@') ? { phone, password } : { email: trimmed, password });
+      }
+
+      let lastError: { message?: string } | null = null;
+      for (const credentials of attempts) {
+        const { data, error } = await sb.auth.signInWithPassword(credentials);
+        if (!error && data.user) {
+          return this.loadUser(data.user.id);
         }
+        lastError = error;
       }
 
-      const { data, error } = await firstSuccessfulPasswordSignIn((next) => sb.auth.signInWithPassword(next), attempts);
-      if (error || !data.user) {
-        return failure(
-          new AppError('AUTHENTICATION_FAILURE', error?.message || 'Sign-in failed', {
-            cause: error,
-            userMessage: 'Sign-in failed. Check your phone number and password.'
-          })
-        );
-      }
-      return this.loadUser(data.user.id);
+      return failure(
+        new AppError('AUTHENTICATION_FAILURE', lastError?.message || 'Sign-in failed', {
+          cause: lastError,
+          userMessage: 'Sign-in failed. Check your phone number and password.'
+        })
+      );
     } catch (err) {
       return failure(toAppError(err, 'AUTHENTICATION_FAILURE'));
     }

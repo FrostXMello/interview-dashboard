@@ -66,6 +66,11 @@ if (!Array.isArray(people) || people.length === 0) {
   process.exit(2);
 }
 
+const passwordFile = resolve(process.cwd(), 'scripts/data/login-passwords.json');
+const passwordByPhone = existsSync(passwordFile)
+  ? JSON.parse(readFileSync(passwordFile, 'utf8'))
+  : {};
+
 const supabase = createClient(url, serviceRoleKey, {
   auth: { persistSession: false, autoRefreshToken: false }
 });
@@ -107,11 +112,11 @@ for (const person of people) {
     continue;
   }
 
-  const keepExistingSuperAdminPassword = role === 'super_admin';
-  const password = keepExistingSuperAdminPassword
-    ? (process.env.SUPER_ADMIN_PASSWORD || '')
-    : uniquePassword();
   const national = phone.replace(/\D/g, '').slice(-10);
+  const password =
+    String(person.password || passwordByPhone[national] || '').trim() ||
+    (role === 'super_admin' ? (process.env.SUPER_ADMIN_PASSWORD || '') : '') ||
+    uniquePassword();
   const email = `${national}@interviews.local`;
 
   try {

@@ -63,8 +63,10 @@ export function LoginForm({
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="block w-full pl-10 pr-10 bg-gray-950 border border-gray-700 rounded-lg py-2.5 text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500 outline-none"
-              placeholder="••••••••"
+              className="block w-full min-h-11 pl-10 pr-12 bg-gray-950 border border-gray-700 rounded-lg py-3 text-base text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="6-digit password"
+              inputMode="numeric"
+              maxLength={12}
             />
             <button
               type="button"
@@ -84,7 +86,7 @@ export function LoginForm({
         <button
           type="submit"
           disabled={loading}
-          className="flex w-full justify-center rounded-lg bg-blue-600 py-2.5 px-4 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-70"
+          className="flex min-h-11 w-full justify-center rounded-lg bg-blue-600 py-3 px-4 text-base font-semibold text-white hover:bg-blue-500 disabled:opacity-70"
         >
           {loading ? <Loader2 className="animate-spin h-5 w-5" /> : 'Login'}
         </button>

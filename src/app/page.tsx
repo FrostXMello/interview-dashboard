@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { useData } from '@/context/DataProvider';
 import { LoginForm } from '@/components/auth/LoginForm';
 import { RegisterFlow } from '@/components/auth/RegisterFlow';
@@ -10,8 +9,11 @@ import { ErrorBanner, SessionLoading } from '@/components/auth/AuthChrome';
 
 type AuthView = 'login' | 'register' | 'forgot';
 
+function goToDashboard() {
+  window.location.replace('/dashboard');
+}
+
 export default function LoginPage() {
-  const router = useRouter();
   const {
     appMode,
     currentUser,
@@ -22,6 +24,7 @@ export default function LoginPage() {
 
   const [view, setView] = useState<AuthView>('login');
   const [attemptedLogin, setAttemptedLogin] = useState(false);
+  const [opening, setOpening] = useState(false);
   const isDemoMode = appMode === 'offline-demo';
 
   const errorText = useMemo(
@@ -30,27 +33,28 @@ export default function LoginPage() {
   );
 
   useEffect(() => {
-    router.prefetch('/dashboard');
-  }, [router]);
-
-  useEffect(() => {
-    if (currentUser) router.replace('/dashboard');
-  }, [currentUser, router]);
+    if (!currentUser || opening) return;
+    setOpening(true);
+    goToDashboard();
+  }, [currentUser, opening]);
 
   const handleLogin = async (phone: string, password: string) => {
     setAttemptedLogin(true);
     clearError();
     const ok = await loginWithPassword(phone, password);
-    if (ok) router.replace('/dashboard');
+    if (ok) {
+      setOpening(true);
+      goToDashboard();
+    }
     return ok;
   };
 
-  if (currentUser) {
+  if (currentUser || opening) {
     return <SessionLoading label="Opening dashboard…" />;
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-4">
+    <div className="flex min-h-dvh flex-col items-center justify-center px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       {isDemoMode && (
         <div className="mb-4 w-full max-w-md">
           <ErrorBanner message="Sign-in is unavailable in this environment until Supabase Auth is configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY, then restart the app." />

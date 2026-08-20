@@ -330,10 +330,10 @@ export default function Dashboard() {
   });
 
   return (
-    <div className="flex min-h-screen lg:h-screen flex-col lg:flex-row bg-gray-950 text-gray-100 overflow-x-hidden font-sans pb-20 lg:pb-0">
+    <div className="flex h-dvh flex-col lg:flex-row bg-gray-950 text-gray-100 overflow-hidden font-sans pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0">
       {/* Sidebar / Student List */}
       <div className={clsx(
-        'w-full lg:w-80 h-[48vh] sm:h-[44vh] lg:h-auto flex flex-col border-b lg:border-b-0 lg:border-r border-gray-800 bg-gray-900/50',
+        'w-full lg:w-80 lg:h-full min-h-0 flex-1 lg:flex-none flex flex-col border-b lg:border-b-0 lg:border-r border-gray-800 bg-gray-900/50',
         mobileView === 'candidates' ? 'flex' : 'hidden lg:flex'
       )}>
         <div className="p-4 border-b border-gray-800">
@@ -366,14 +366,14 @@ export default function Dashboard() {
           </div>
           <div className="flex mt-4 gap-1 bg-gray-800 p-1 rounded-lg">
             {([
-              { id: 'all', label: 'All candidates' },
+              { id: 'all', label: 'All' },
               { id: 'unscheduled', label: 'Unscheduled' }
             ] as const).map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setListFilter(tab.id)}
                 className={clsx(
-                  'flex-1 text-xs py-1.5 rounded-md transition-colors',
+                  'flex-1 min-h-10 text-xs font-medium py-2 rounded-md transition-colors',
                   listFilter === tab.id ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
                 )}
               >
@@ -390,7 +390,7 @@ export default function Dashboard() {
                 key={tab.id}
                 onClick={() => setListFilter(tab.id)}
                 className={clsx(
-                  'flex-1 text-xs py-1.5 rounded-md transition-colors',
+                  'flex-1 min-h-10 text-xs font-medium py-2 rounded-md transition-colors',
                   listFilter === tab.id ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
                 )}
               >
@@ -404,7 +404,7 @@ export default function Dashboard() {
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={clsx(
-                  "flex-1 text-xs py-1.5 rounded-md capitalize transition-colors",
+                  "flex-1 min-h-10 text-xs font-medium py-2 rounded-md capitalize transition-colors",
                   activeTab === tab ? "bg-blue-600 text-white shadow" : "text-gray-400 hover:text-gray-200"
                 )}
               >
@@ -417,8 +417,8 @@ export default function Dashboard() {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name or registration no"
-              className="w-full pl-9 pr-3 py-2 rounded-lg bg-gray-950 border border-gray-800 text-sm text-gray-200 placeholder:text-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+              placeholder="Search name or reg no"
+              className="w-full min-h-11 pl-9 pr-3 py-2.5 rounded-lg bg-gray-950 border border-gray-800 text-base text-gray-200 placeholder:text-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
             />
           </div>
         </div>
@@ -434,7 +434,7 @@ export default function Dashboard() {
                 key={student.id}
                 onClick={() => handleSelectStudent(student.id)}
                 className={clsx(
-                  "w-full text-left p-3.5 rounded-xl border transition-all group relative",
+                  "w-full text-left p-3.5 min-h-[4.25rem] rounded-xl border transition-all group relative",
                   selectedStudentId === student.id
                     ? "bg-blue-900/20 border-blue-500/50 text-white"
                     : "bg-gray-900/30 border-gray-800 text-gray-400 hover:bg-gray-800 hover:border-gray-700"
@@ -486,7 +486,7 @@ export default function Dashboard() {
              <button
                type="button"
                aria-label="Log out"
-               onClick={() => { logout(); router.push('/'); }}
+               onClick={() => { logout(); window.location.replace('/'); }}
                className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-red-400 transition-colors"
              >
                <LogOut className="h-5 w-5" />
@@ -496,7 +496,7 @@ export default function Dashboard() {
       </div>
 
       {/* Main Content */}
-      <main className={clsx('flex-1 flex overflow-hidden relative', mobileView === 'candidates' ? 'hidden lg:flex' : 'flex')}>
+      <main className={clsx('flex-1 min-h-0 flex overflow-hidden relative', mobileView === 'candidates' ? 'hidden lg:flex' : 'flex')}>
         {selectedStudent ? (
           <div className="flex-1 flex flex-col overflow-y-auto">
             {/* Header */}
@@ -606,17 +606,17 @@ export default function Dashboard() {
                              {typeof myRating.scores[criterion] === 'number' ? myRating.scores[criterion] : '-'}
                            </span>
                          </div>
-                         <div className="flex gap-1">
+                         <div className="grid grid-cols-5 gap-2">
                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(num => (
                              <button
                                key={num}
                                onClick={() => !myRating.submitted && handleScoreChange(criterion, num)}
                                disabled={myRating.submitted}
                                className={clsx(
-                                 "flex-1 h-10 rounded-md text-sm font-semibold transition-all border",
+                                 "min-h-11 rounded-lg text-sm font-semibold transition-all border",
                                  (myRating.scores[criterion] === num)
-                                   ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20 scale-105"
-                                   : "bg-gray-800 border-gray-700 text-gray-500 hover:bg-gray-700 hover:text-gray-300 hover:border-gray-600"
+                                   ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20"
+                                   : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-gray-200 hover:border-gray-600"
                                )}
                              >
                                {num}
@@ -636,7 +636,7 @@ export default function Dashboard() {
                           onClick={() => !myRating.submitted && handlePriorityDomainToggle(domain)}
                           disabled={myRating.submitted}
                           className={clsx(
-                            'px-3 py-2 rounded-lg border text-sm text-left transition-all',
+                            'min-h-11 px-3 py-2 rounded-lg border text-sm text-left transition-all',
                             myDomainPriorities.includes(domain)
                               ? 'border-cyan-400/60 bg-cyan-500/15 text-cyan-200 shadow'
                               : 'border-gray-700 bg-gray-800/70 text-gray-300 hover:bg-gray-700/80'
@@ -696,7 +696,7 @@ export default function Dashboard() {
                       onBlur={commitCommentDraft}
                       disabled={myRating.submitted}
                       placeholder="Write your interview comments here..."
-                      className="w-full h-32 bg-gray-950 border border-gray-800 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"
+                      className="w-full min-h-24 bg-gray-950 border border-gray-800 rounded-lg p-3 text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"
                     />
                   </div>
 
@@ -736,7 +736,7 @@ export default function Dashboard() {
                         }}
                         disabled={myRating.submitted || typeof myRating.scores['Interview Score'] !== 'number' || myDomainPriorities.length === 0}
                         className={clsx(
-                          "flex items-center gap-2 px-6 py-2.5 rounded-lg font-semibold transition-all",
+                          "flex min-h-11 items-center gap-2 px-5 py-2.5 rounded-lg font-semibold transition-all",
                           myRating.submitted
                             ? "bg-green-600/20 text-green-500 cursor-default"
                             : (typeof myRating.scores['Interview Score'] !== 'number' || myDomainPriorities.length === 0)
@@ -1000,12 +1000,12 @@ export default function Dashboard() {
         </div>
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-gray-800 bg-gray-900/95 backdrop-blur lg:hidden">
-        <div className="mx-auto flex max-w-3xl items-center justify-around px-3 py-2">
+      <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-gray-800 bg-gray-900/95 backdrop-blur lg:hidden pb-[env(safe-area-inset-bottom)]">
+        <div className="mx-auto flex max-w-3xl items-center justify-around px-2 py-1.5">
           {[
             { key: 'candidates', label: 'Candidates', icon: Users },
-            { key: 'evaluation', label: 'Evaluation', icon: Star },
-            { key: 'leaderboard', label: 'Leaderboard', icon: BarChart3 }
+            { key: 'evaluation', label: 'Evaluate', icon: Star },
+            { key: 'leaderboard', label: 'Ranks', icon: BarChart3 }
           ].map((item) => {
             const Icon = item.icon;
             const active = mobileView === item.key;
@@ -1016,11 +1016,11 @@ export default function Dashboard() {
                 type="button"
                 onClick={() => setMobileView(item.key as typeof mobileView)}
                 className={clsx(
-                  'flex min-w-[96px] flex-col items-center gap-1 rounded-lg px-3 py-1.5 text-xs transition-colors',
+                  'flex min-h-12 min-w-[5.5rem] flex-col items-center justify-center gap-0.5 rounded-xl px-3 text-xs font-medium transition-colors',
                   active ? 'bg-blue-600/20 text-blue-300' : 'text-gray-400 hover:text-gray-200'
                 )}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className="h-5 w-5" />
                 <span>{item.label}</span>
               </button>
             );

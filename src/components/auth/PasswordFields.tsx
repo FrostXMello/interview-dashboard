@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Eye, EyeOff, Lock } from 'lucide-react';
 
 const fieldClass =
-  'block w-full pl-10 pr-10 bg-gray-950 border border-gray-700 rounded-lg py-2.5 text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none';
+  'block w-full min-h-11 pl-10 pr-12 bg-gray-950 border border-gray-700 rounded-lg py-3 text-base text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none';
 
 function Field({
   id,

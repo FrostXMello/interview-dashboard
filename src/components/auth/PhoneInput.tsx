@@ -3,7 +3,7 @@
 import { nationalDigits, normalizePhoneE164 } from '@/lib/auth/phone';
 
 const inputClass =
-  'block w-full bg-gray-950 border border-gray-700 rounded-lg py-2.5 text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none';
+  'block w-full min-h-11 bg-gray-950 border border-gray-700 rounded-lg px-3 py-3 text-base text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none';
 
 export function PhoneInput({
   id,
@@ -28,7 +28,7 @@ export function PhoneInput({
         Phone number
       </label>
       <div className="mt-1 flex gap-2">
-        <div className="flex items-center rounded-lg border border-gray-700 bg-gray-950 px-3 text-sm text-gray-300">
+        <div className="flex min-h-11 items-center rounded-lg border border-gray-700 bg-gray-950 px-3 text-sm text-gray-300">
           +91
         </div>
         <input
