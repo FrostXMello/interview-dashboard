@@ -5,6 +5,11 @@ import { DataProvider } from "@/context/DataProvider";
 export const metadata: Metadata = {
   title: "Interview Dashboard Pro",
   description: "Interview Rating System",
+  applicationName: "Interview Dashboard",
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/apple-icon.png" }]
+  },
   appleWebApp: {
     capable: true,
     title: "Interview Dashboard",
