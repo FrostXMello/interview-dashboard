@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '@/context/DataProvider';
 import { LoginForm } from '@/components/auth/LoginForm';
 import { RegisterFlow } from '@/components/auth/RegisterFlow';
@@ -18,6 +18,7 @@ export default function LoginPage() {
     appMode,
     currentUser,
     loginWithPassword,
+    logout,
     lastError,
     clearError
   } = useData();
@@ -25,6 +26,8 @@ export default function LoginPage() {
   const [view, setView] = useState<AuthView>('login');
   const [attemptedLogin, setAttemptedLogin] = useState(false);
   const [opening, setOpening] = useState(false);
+  const [stayOnLogin, setStayOnLogin] = useState(false);
+  const forcedLogoutRef = useRef(false);
   const isDemoMode = appMode === 'offline-demo';
 
   const errorText = useMemo(
@@ -33,13 +36,22 @@ export default function LoginPage() {
   );
 
   useEffect(() => {
-    if (!currentUser || opening) return;
+    if (forcedLogoutRef.current) return;
+    if (new URLSearchParams(window.location.search).get('loggedOut') !== '1') return;
+    forcedLogoutRef.current = true;
+    setStayOnLogin(true);
+    void logout();
+  }, [logout]);
+
+  useEffect(() => {
+    if (!currentUser || opening || stayOnLogin) return;
     setOpening(true);
     goToDashboard();
-  }, [currentUser, opening]);
+  }, [currentUser, opening, stayOnLogin]);
 
   const handleLogin = async (phone: string, password: string) => {
     setAttemptedLogin(true);
+    setStayOnLogin(false);
     clearError();
     const ok = await loginWithPassword(phone, password);
     if (ok) {
@@ -49,7 +61,7 @@ export default function LoginPage() {
     return ok;
   };
 
-  if (currentUser || opening) {
+  if ((currentUser || opening) && !stayOnLogin) {
     return <SessionLoading label="Opening dashboard…" />;
   }
 

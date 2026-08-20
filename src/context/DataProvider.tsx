@@ -30,7 +30,7 @@ interface DataContextType {
   enterDemoPersona: (personaId: string) => Promise<boolean>;
   /** @deprecated Prefer loginWithPassword / enterDemoPersona */
   login: (identifier: string, pass: string, nameHint?: string, rememberMe?: boolean) => boolean;
-  logout: () => void;
+  logout: () => Promise<void>;
   addStudent: (student: Student) => void;
   updateRating: (rating: Rating) => void;
   submitRating: (studentId: string, panelistId: string) => void;
@@ -388,16 +388,19 @@ export const DataProvider = ({ children }: { children: React.ReactNode }) => {
     [appMode]
   );
 
-  const logout = useCallback(() => {
-    void (async () => {
+  const logout = useCallback(async () => {
+    sessionEpochRef.current += 1;
+    try {
       const result = await repository.signOut();
       if (!result.ok) reportError(result.error);
-      setCurrentUser(null);
-      setStudents([]);
-      setRatings([]);
-      setViewAsPanelist(false);
-      setSyncStatus(appMode === 'offline-demo' ? 'offline' : 'ready');
-    })();
+    } catch (err) {
+      reportError(err instanceof AppError ? err : new AppError('NETWORK_FAILURE', 'Sign-out failed'));
+    }
+    setCurrentUser(null);
+    setStudents([]);
+    setRatings([]);
+    setViewAsPanelist(false);
+    setSyncStatus(appMode === 'offline-demo' ? 'offline' : 'ready');
   }, [appMode, reportError, repository, setViewAsPanelist]);
 
   const addStudent = useCallback((student: Student) => {

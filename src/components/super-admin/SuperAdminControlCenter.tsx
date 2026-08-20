@@ -42,6 +42,7 @@ export function SuperAdminControlCenter() {
   const [section, setSection] = useState<Section>('overview');
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const [message, setMessage] = useState('');
   const [panelIdsInputByUser, setPanelIdsInputByUser] = useState<Record<string, string>>({});
 
@@ -121,16 +122,23 @@ export function SuperAdminControlCenter() {
     );
   };
 
+  const handleLogout = async () => {
+    if (leaving) return;
+    setLeaving(true);
+    await logout();
+    window.location.replace('/?loggedOut=1');
+  };
+
   return (
-    <div className="min-h-dvh bg-gray-950 text-gray-100 p-3 sm:p-4 md:p-6 lg:p-8 space-y-4 sm:space-y-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-      <header className="rounded-xl border border-gray-800 bg-gray-900/50 p-4 md:p-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+    <div className="min-h-dvh bg-gray-950 text-gray-100 p-3 sm:p-4 md:p-6 lg:p-8 space-y-4 sm:space-y-6 pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+      <header className="sticky top-0 z-40 rounded-xl border border-gray-800 bg-gray-950/95 backdrop-blur p-4 md:p-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
           <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">Super Admin Control Center</h1>
           <p className="mt-2 text-sm text-gray-400">Manage users, candidates, and live interview data.</p>
           {message ? <p className="mt-3 text-sm text-blue-300">{message}</p> : null}
           {lastError ? <p className="mt-3 text-sm text-red-300">{lastError.message}</p> : null}
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+        <div className="hidden md:flex md:flex-wrap md:items-center gap-2">
           <button
             type="button"
             onClick={() => setViewAsPanelist(true)}
@@ -142,11 +150,12 @@ export function SuperAdminControlCenter() {
           <button
             type="button"
             aria-label="Log out"
-            onClick={() => { logout(); window.location.replace('/'); }}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-red-300"
+            disabled={leaving}
+            onClick={() => { void handleLogout(); }}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-red-300 disabled:opacity-60"
           >
             <LogOut className="h-4 w-4" />
-            Log out
+            {leaving ? 'Logging out…' : 'Log out'}
           </button>
         </div>
       </header>
@@ -457,6 +466,29 @@ export function SuperAdminControlCenter() {
           <p className="mt-2 text-sm text-gray-400">Placeholder for Phase 4. Spreadsheet upload and mapping are not implemented in this phase.</p>
         </section>
       )}
+
+      <div className="fixed inset-x-0 bottom-0 z-50 md:hidden border-t border-gray-800 bg-gray-950/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
+        <div className="grid grid-cols-2 gap-2 p-3">
+          <button
+            type="button"
+            onClick={() => setViewAsPanelist(true)}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white"
+          >
+            <ClipboardList className="h-4 w-4" />
+            Interview
+          </button>
+          <button
+            type="button"
+            aria-label="Log out"
+            disabled={leaving}
+            onClick={() => { void handleLogout(); }}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-red-800 bg-red-950/40 px-3 text-sm font-semibold text-red-200 disabled:opacity-60"
+          >
+            <LogOut className="h-4 w-4" />
+            {leaving ? 'Logging out…' : 'Log out'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

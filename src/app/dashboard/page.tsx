@@ -488,7 +488,12 @@ export default function Dashboard() {
              <button
                type="button"
                aria-label="Log out"
-               onClick={() => { logout(); window.location.replace('/'); }}
+               onClick={() => {
+                 void (async () => {
+                   await logout();
+                   window.location.replace('/?loggedOut=1');
+                 })();
+               }}
                className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-red-400 transition-colors"
              >
                <LogOut className="h-5 w-5" />
